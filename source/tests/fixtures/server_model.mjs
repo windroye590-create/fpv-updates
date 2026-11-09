@@ -154,7 +154,9 @@ class ModelBlob {
  setName(name){this.name=name;return this;}setContentType(type){this.type=type;return this;}getContentType(){return this.type;}
  copyBlob(){return new ModelBlob(this.value,this.type,this.name);}
 }
-const BACKEND_SPREADSHEET_ID = "FPV_DATABASE_NOT_CONNECTED";
+const serverSourceText = fs.readFileSync(process.env.LITAKOVA_SERVER_SOURCE || new URL("../../Code.gs", import.meta.url), "utf8");
+const BACKEND_SPREADSHEET_ID = serverSourceText.match(/^const SPREADSHEET_ID = '([^']+)';/m)?.[1];
+assert.ok(BACKEND_SPREADSHEET_ID,"The isolated server model needs the configured database identity");
 const spreadsheet = new Spreadsheet(BACKEND_SPREADSHEET_ID);
 const spreadsheets = new Map([[spreadsheet.id, spreadsheet]]);
 let createdSpreadsheetCounter = 0;
@@ -213,7 +215,7 @@ const context = vm.createContext({
   }
 });
 
-const source = fs.readFileSync(process.env.LITAKOVA_SERVER_SOURCE || new URL("../../Code.gs", import.meta.url), "utf8");
+const source = serverSourceText;
 vm.runInContext(source, context, {filename: "Код.gs"});
 
 

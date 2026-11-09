@@ -1,4 +1,6 @@
 import json
+import base64
+import hashlib
 from pathlib import Path
 import shutil
 import sys
@@ -60,18 +62,26 @@ class VersionTests(unittest.TestCase):
         self.assertEqual((self.source / 'package.json').read_bytes(), before)
 
 
-@unittest.skipUnless((pipeline.ROOT/'channel/updates.txt').exists(),'No previously published FPV catalog yet')
 class SnapshotTests(unittest.TestCase):
     def test_candidate_records_complete_source_without_publishing_or_private_files(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
             (root / 'release-tools').mkdir()
-            (root / 'channel').mkdir()
-            shutil.copyfile(pipeline.ROOT / 'release-tools/update-public.pem', root / 'release-tools/update-public.pem')
+            from cryptography.hazmat.primitives import hashes,serialization
+            from cryptography.hazmat.primitives.asymmetric import padding,rsa
+            key=rsa.generate_private_key(public_exponent=65537,key_size=3072)
+            (root/'release-tools/update-public.pem').write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
             (root / 'next-release-notes.md').write_text('Verified release fixture')
             receipt = root / 'plan.json'
             receipt.write_text(json.dumps({'changed': False, 'targetBuild': 'existing-server'}))
-            bundle = pipeline.ROOT / 'channel'
+            bundle=root/'input-bundle';bundle.mkdir()
+            executable=b'MZsynthetic snapshot executable';(bundle/'FPV-Komisiia-PC.exe').write_bytes(executable)
+            (bundle/'icon.png').write_bytes(b'\x89PNG\r\n\x1a\nsynthetic-icon')
+            (bundle/'index.html').write_text('FPV-Komisiia-PC.exe 1.0.0')
+            payload=('schema=1\nandroid.code=1\nandroid.name=1.0.0\nandroid.file=FPV-Komisiia-reserved.apk\nandroid.size=1\nandroid.sha256='+('0'*64)+'\nwindows.code=1\nwindows.name=1.0.0\nwindows.file=FPV-Komisiia-PC.exe\nwindows.size='+str(len(executable))+'\nwindows.sha256='+hashlib.sha256(executable).hexdigest()+'\n').encode()
+            wire=b'LKUPDATE1\n'+base64.b64encode(key.sign(payload,padding.PKCS1v15(),hashes.SHA256()))+b'\n'+payload
+            (bundle/'updates.txt').write_bytes(wire)
+            self.assertFalse((root/'channel').exists())
             with patch.object(pipeline, 'ROOT', root), patch.dict('os.environ', {
                 'GITHUB_REF': 'refs/heads/main', 'GITHUB_REPOSITORY': pipeline.github.REPOSITORY,
             }):
@@ -89,6 +99,11 @@ class SnapshotTests(unittest.TestCase):
 
 
 class PublishedPreviewVersionTests(unittest.TestCase):
+    def test_a_first_fpv_release_starts_without_an_existing_published_catalog(self):
+        class Client:
+            def latest(self):return None
+        with patch.object(pipeline.github,'GitHub',return_value=Client()):
+            self.assertEqual(pipeline.published_version(),(0,'0.0.0'))
     def test_signed_public_previews_reserve_their_build_codes(self):
         stable={'id':1,'draft':False,'assets':[{'name':'updates.txt','code':150}]}
         previews=[{'draft':False,'prerelease':True,'assets':[{'name':'updates.txt','code':151}]},

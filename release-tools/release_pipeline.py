@@ -130,6 +130,7 @@ def snapshot(bundle_dir, receipt, dry_run=False):
     stage.mkdir(parents=True, exist_ok=True)
     archive = stage / ('FPV-Komisiia-PC-' + bundle.version + '-source.zip')
     subprocess.run(['python3', str(SOURCE / 'release-tools/package_source.py'), str(archive)], check=True)
+    (ROOT / 'channel').mkdir(parents=True, exist_ok=True)
     for name in github.FILES:
         shutil.copyfile(Path(bundle_dir) / name, ROOT / 'channel' / name)
     notes = (ROOT / 'next-release-notes.md').read_text().strip()
