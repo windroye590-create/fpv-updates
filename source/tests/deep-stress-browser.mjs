@@ -94,7 +94,7 @@ try{
  check('Restored connection commits 27 mixed works once, with pending manual grades',()=>{assert.equal(results2.length,27);assert.ok(results2.every(r=>r.correct===20&&r.pendingWritten===15&&r.score===null));});
  check('405 large written answers remain byte-for-byte identical in authoritative storage',()=>{for(const r of results2){const record=context.resultRecordById_(r.id),answers=JSON.parse(record.row[13]);for(const q of mixed.questions.filter(q=>q.type==='written'))assert.equal(answers[q.id],text);}});
  check('Every saved queue is empty only after a server acknowledgement',()=>{for(let i=0;i<27;i++)assert.equal(stores[i].accounts[cadets[i].user.id].pending.length,0);});
- await Promise.all(pages.map(p=>p.evaluate(async()=>{const a=await import('/app.js');for(const name of ['tests','results','home'])await a.navigate(name);}))); 
+ await Promise.all(pages.map(p=>p.evaluate(async()=>{const a=await import('/app.js');for(const name of ['tests','results','home'])await a.navigate(name);})));
  check('No application exceptions, leaked cross-account requests or external traffic',()=>{assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);});
  const sorted=latencies.toSorted((a,b)=>a-b);
  const report={status:'passed',kind:'isolated_27_chromium_clients_real_app_and_real_Code_gs',version:release.version,productionWrites:false,liveGoogleCapacityMeasured:false,windowsRuntimeVerified:false,clients:27,committedResults:54,choiceAnswersChecked:5940,writtenAnswersChecked:405,writtenChars:text.length*405,checks,metrics,wallSeconds:Math.round((performance.now()-started)/1000),localFinishMilliseconds:{median:Math.round(sorted[Math.floor(sorted.length/2)]),p95:Math.round(sorted[Math.floor(sorted.length*.95)])}};

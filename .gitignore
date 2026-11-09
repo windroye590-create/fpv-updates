@@ -16,4 +16,5 @@ keypass.txt
 /source/build/
 /source/verification/
 **/node_modules/
+**/node_modules
 *.dpapi

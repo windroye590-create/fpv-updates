@@ -185,8 +185,7 @@ function Read-FPVSigning([string]$Folder, [Security.SecureString]$NewPassword = 
         if ($null -eq $NewPassword) { $NewPassword = Read-Host 'Choose a private FPV signing backup password (16+ characters; keep it with your backup)' -AsSecureString }
         $password = [Net.NetworkCredential]::new('',$NewPassword).Password
         if ($password.Length -lt 16) { throw 'Use at least 16 characters for the FPV signing backup password.' }
-        $rsa = [Security.Cryptography.RSA]::Create()
-        $rsa.KeySize = 3072
+        $rsa = [Security.Cryptography.RSACng]::new(3072)
         try {
             $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=FPV Commission Updates',$rsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
             $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1),[DateTimeOffset]::UtcNow.AddYears(20))
@@ -288,4 +287,3 @@ Write-Host "Keep the original private signing backup: $signingFolder"
 Write-Host "Provisioning result: https://github.com/$repo/actions/workflows/bootstrap-fpv.yml"
 Write-Host 'The workflow will show the Google editor link. Run setupCommission once there to grant Spreadsheet access.'
 Write-Host 'After Google authorization, release 1.0.0 using release.yml.'
-
