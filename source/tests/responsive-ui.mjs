@@ -73,7 +73,15 @@ async function audit(name){
  checks.push(name);
 }
 async function allSizes(name){for(const size of sizes){await page.setViewportSize(size);await audit(name+` ${size.width}×${size.height}`);}}
-async function navigate(next){await page.evaluate(async n=>(await import('/app.js')).navigate(n),next);}
+async function navigate(next){
+ await page.evaluate(n=>{
+  // Keep the promise reachable while DevTools waits and Chromium collects the
+  // large responsive fixtures. Otherwise CDP can lose the evaluated promise.
+  const navigation=import('/app.js').then(app=>app.navigate(n));
+  globalThis.__responsiveNavigation=navigation;
+  return navigation;
+ },next);
+}
 const action=act=>page.locator(`button[data-action="${act}"]`).first().click();
 try{
  await open('instructor');
