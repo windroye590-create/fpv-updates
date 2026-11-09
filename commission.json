@@ -11,13 +11,13 @@
   "version": "1.0.0",
   "versionCode": 1,
   "signing": {
-    "certificateSha256": null
+    "certificateSha256": "0e3ca6512249fbff7ea8a8104abfb0e005e6b0bb01393c4b2afd9787bcb835bf"
   },
   "cloud": {
     "scriptId": null,
     "deploymentId": null,
     "webAppUrl": null,
-    "spreadsheetId": null
+    "spreadsheetId": "1681BlupvfIfWmQKy1BiGK8SOFpd7guAtaH20nn_5g64"
   },
   "upstream": {
     "repository": "https://github.com/windroye590-create/litakova-updates",
