@@ -15,8 +15,8 @@
   },
   "cloud": {
     "scriptId": "1Tb-WkixPJYD7AcdcqlxvrjN9eFhrzVE8VZ7eu2GXsa_W8NuPEMM_qZzq",
-    "deploymentId": null,
-    "webAppUrl": null,
+    "deploymentId": "AKfycbx18jQ0GMTxLODwnA7QIe79fEYmy0nLAobGJaYxrUJA4BHUXvpEtai4hj5ZHUqRXyRsPQ",
+    "webAppUrl": "https://script.google.com/macros/s/AKfycbx18jQ0GMTxLODwnA7QIe79fEYmy0nLAobGJaYxrUJA4BHUXvpEtai4hj5ZHUqRXyRsPQ/exec",
     "spreadsheetId": "1681BlupvfIfWmQKy1BiGK8SOFpd7guAtaH20nn_5g64"
   },
   "upstream": {
