@@ -1,9 +1,17 @@
 {
   "commission": "fpv",
-  "phase": "awaiting_owner_authorization",
+  "phase": "ready",
   "scriptUrl": "https://script.google.com/home/projects/1Tb-WkixPJYD7AcdcqlxvrjN9eFhrzVE8VZ7eu2GXsa_W8NuPEMM_qZzq/edit",
   "previousSourceSha256": null,
   "sourceSha256": "61d43dc86bb7eb58e1ee1a3966592697d66ada5941e411cdb2be6cb5fecffeed",
   "serverBuild": "pc-api26-acac48e64011cc1f",
-  "deploymentVersion": 1
+  "deploymentVersion": 1,
+  "ownerAuthorizationVerifiedAt": "2026-11-09T19:49:17Z",
+  "release": {
+    "version": "1.0.0",
+    "code": 1,
+    "url": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.0",
+    "exeSha256": "2dfa4dbb1585edbd25df79bc59e5de7ef96947716b82424aded1023098d26691",
+    "verification": "release-staging/v1.0.0/published-verification.json"
+  }
 }

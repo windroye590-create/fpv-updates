@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "version": "1.0.0",
+  "code": 1,
+  "releaseId": 439562596,
+  "releaseUrl": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.0",
+  "stable": true,
+  "allFourAssetsMatchCommittedChannel": true,
+  "fpvSignatureVerified": true,
+  "bothCommissionsRejectEachOthersCatalogs": true,
+  "size": 8669401,
+  "sha256": "2dfa4dbb1585edbd25df79bc59e5de7ef96947716b82424aded1023098d26691",
+  "verifiedAt": "2026-11-09T19:49:17Z",
+  "releaseSourceCommit": "946c6d3c328c5c11ef06060044db81e0ed237939",
+  "sourceArchiveSha256": "44c2f4fd4a71b245dce1f58d7ccddae5250aa8d2650c008cc847590a345a6424",
+  "server": {
+    "status": "passed",
+    "api": 26,
+    "service": "FPV Комісія",
+    "serverBuild": "pc-api26-acac48e64011cc1f",
+    "spreadsheetLayoutReady": true
+  },
+  "checks": {
+    "desktopUIScenarios": 51,
+    "responsiveUIChecks": 308,
+    "packedStartupChecks": 10,
+    "nativeUpdateProtocolChecks": 29,
+    "windowsHostChecks": 16
+  },
+  "windowsAuditUrl": "https://github.com/windroye590-create/fpv-updates/actions/runs/42686616661",
+  "releaseWorkflowUrl": "https://github.com/windroye590-create/fpv-updates/actions/runs/42685182209",
+  "releaseWorkflowConclusion": "cancelled",
+  "releaseWorkflowNote": "A cancellation was requested using stale job status. Publication, post-upload byte verification and report upload completed; the released files were independently downloaded and verified, and a separate Windows audit passed."
+}
