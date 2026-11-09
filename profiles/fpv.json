@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "fpv",
+  "name": "FPV Комісія",
+  "ownerEmail": "fpv.training.center@gmail.com",
+  "developerName": "Розробник",
+  "developerLogin": "WindRoy",
+  "repository": "windroye590-create/fpv-updates",
+  "storageDirectory": "FPVKomisiiaPC",
+  "executableName": "FPV-Komisiia-PC.exe",
+  "version": "1.0.0",
+  "versionCode": 1,
+  "signing": {"certificateSha256": null},
+  "cloud": {"scriptId": null, "deploymentId": null, "webAppUrl": null, "spreadsheetId": null},
+  "upstream": {"repository": "https://github.com/windroye590-create/litakova-updates", "commit": "499632333767e1d4fef04813e8abb7746439116c", "version": "1.2.34"}
+}

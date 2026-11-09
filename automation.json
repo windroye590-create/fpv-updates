@@ -1,0 +1,18 @@
+{
+  "scriptId": "FPV_SCRIPT_NOT_CONNECTED",
+  "deploymentId": "FPV_DEPLOYMENT_NOT_CONNECTED",
+  "webAppUrl": "https://script.google.com/macros/s/FPV_DEPLOYMENT_NOT_CONNECTED/exec",
+  "spreadsheetId": "FPV_DATABASE_NOT_CONNECTED",
+  "apiVersion": 26,
+  "requiredCapabilities": [
+    "singleAttempt",
+    "resultDeletion",
+    "privateLocalStorage",
+    "trainingResume",
+    "examRecovery",
+    "multipleChoice",
+    "writtenTests"
+  ],
+  "claspVersion": "3.4.1",
+  "ownerEmail": "fpv.training.center@gmail.com"
+}

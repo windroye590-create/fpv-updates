@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {reportModel,xlsxBytes,reportFilename} from '../web/excel-report.js';
+const checks=[];function check(name,run){run();checks.push(name);console.log('PASS '+name);}
+const cadets=[{id:'u1',fullName:'Однакове ПІБ',username:'one',groupName:'Б',role:'cadet'},{id:'u2',fullName:'Однакове ПІБ',username:'two',groupName:'А',role:'cadet'},{id:'u3',fullName:'=1+1',username:'three',groupName:'Б',role:'cadet'},{id:'u4',fullName:'Ще не проходив',username:'four',groupName:'А',role:'cadet'}];
+const tests=[{id:'t1',title:'Однакова назва',published:true,assignedGroups:['А']},{id:'t2',title:'Однакова назва',published:true,assignedGroups:['А']},{id:'t3',title:'Наступний тест',published:true,assignedGroups:['Б']}];
+const result=(id,userId,groupName,testId,extra={})=>({id,userId,userName:cadets.find(u=>u.id===userId).fullName,groupName,testId,testTitle:tests.find(t=>t.id===testId).title,completedAt:'2026-11-08T12:34:00Z',score:80,passed:true,correct:8,total:10,choiceTotal:10,earnedPoints:8,maxPoints:10,durationSeconds:3661,gradingStatus:'graded',...extra});
+const results=[result('r1','u1','А','t1'),result('r2','u2','А','t1',{score:null,passed:null,gradingStatus:'pending_review',pendingWritten:1}),result('r3','u3','Б','t1',{score:0,passed:false,correct:0,earnedPoints:0}),result('r4','u1','А','t2',{score:100,correct:0,choiceTotal:0,earnedPoints:10})];
+const model=reportModel({cadets,tests,results,generatedAt:'2026-11-08T13:00:00Z',scope:'Перевірка <Excel> & звіт'},{timezoneOffsetMinutes:-180});
+const rows=model.sheets[0].rows,matrix=model.sheets[1],summaries=model.sheets[2].rows;
+check('A workbook has results, a group matrix and a completed-only summary',()=>assert.deepEqual(model.sheets.map(s=>s.name),['Результати','Відомість групи','Зведення']));
+check('Final grades are numeric fractions; a genuine zero is retained',()=>{assert.equal(rows.find(r=>r[13]==='r1')[5].v,.8);assert.equal(rows.find(r=>r[13]==='r3')[5].v,0);});
+check('Unreviewed written work has a pending label and no false final zero',()=>{const row=rows.find(r=>r[13]==='r2');assert.equal(row[4].v,'Очікує перевірки');assert.equal(row[5].v,'');});
+check('Written-only work has final points without invented multiple-choice errors',()=>{const r=rows.find(r=>r[13]==='r4');assert.equal(r[9],'');assert.equal(r[10],'');assert.equal(r[11].v,'');assert.equal(r[5].v,1);});
+check('Namesakes and historical groups are joined by stable identity',()=>{const one=matrix.rows.filter(r=>r[0]==='Однакове ПІБ');assert.equal(one.length,3);const old=one.find(r=>r[1]==='А'&&r[2]==='#u1');assert.equal(old.at(-1).v,.9);assert.equal(one.find(r=>r[2]==='one').at(-2),0);assert.equal(one.find(r=>r[2]==='two').at(-2),1);});
+check('Same-title tests remain separate columns with their IDs',()=>{assert.ok(matrix.columns.some(c=>c[0]==='Однакова назва · #t1'));assert.ok(matrix.columns.some(c=>c[0]==='Однакова назва · #t2'));});
+check('An assigned missing attempt differs from a test outside this group',()=>{const row=matrix.rows.find(r=>r[2]==='four');assert.equal(row[3].v,'—');assert.equal(row[4].v,'Не проходив');});
+check('Summary averages and success rates exclude pending reviews',()=>{const group=summaries.find(r=>r[0]==='А');assert.deepEqual(group.slice(1,7),[3,3,2,2,0,1]);assert.equal(group[7].v,.9);assert.equal(group[8].v,1);assert.equal(summaries.at(-1)[1],4);assert.equal(summaries.find(r=>r[0]==='Б')[7].v,0);});
+check('Archive filenames retain a useful label and strip path characters',()=>{const name=reportFilename('Набір / А: <test>','2026-11-08T12:34:00Z');assert.ok(name.endsWith('.xlsx'));assert.doesNotMatch(name,/[<>:"/\\|?*]/);assert.ok(reportFilename('Набір','2026-11-08T22:34:00Z',-180).includes('2026-11-09_01-34'));});
+const output=new URL('../verification/excel-report.xlsx',import.meta.url);fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});fs.writeFileSync(output,xlsxBytes(model));
+check('The independent Excel parser opens every sheet and verifies typed cells and formatting',()=>execFileSync('python3',[new URL('./excel_report_validate.py',import.meta.url).pathname,output.pathname],{stdio:'pipe'}));
+check('The generated Apps Script contains the exact shared report implementation',()=>execFileSync('python3',[new URL('../release-tools/sync_report.py',import.meta.url).pathname,'--check'],{stdio:'pipe'}));
+check('A large roster and repeated exports preserve every result without mutating input',()=>{const many={cadets:cadets.map(x=>({...x})),tests,generatedAt:'2026-11-08T13:00:00Z',results:Array.from({length:1000},(_,i)=>({...results[i%4],id:'large-'+i}))},before=JSON.stringify(many),a=xlsxBytes(reportModel(many)),b=xlsxBytes(reportModel(many));assert.equal(reportModel(many).sheets[0].rows.length,1000);assert.equal(JSON.stringify(many),before);assert.deepEqual(a,b);});
+fs.writeFileSync(new URL('../verification/excel-report.json',import.meta.url),JSON.stringify({status:'passed',passed:checks.length,checks,independentOpenpyxlVerified:true,productionRequests:0},null,2));

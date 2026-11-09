@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';
+process.env.LITAKOVA_SERVER_SOURCE=new URL('../Code.gs',import.meta.url).pathname;
+const {api,context,instructorToken,credential,regressionTest}=await import('./fixtures/server_model.mjs');
+const checks=[];function check(n,f){f();checks.push(n);}
+const g=api('POST','/api/instructor/groups',instructorToken,{name:'Архівна навчальна група'}).group;
+const other=api('POST','/api/instructor/groups',instructorToken,{name:'Група призначення'}).group;
+const cadet=api('POST','/api/register','',{fullName:'Курсант Збереження Архіву',username:'archive_cadet',groupId:g.id,...credential('archive-password')});
+const template={description:'',published:true,mode:'training',passingPercent:70,questions:[{text:'Питання архіву?',answers:[{text:'Так',isCorrect:true},{text:'Ні',isCorrect:false}]}]};
+const t1=api('POST','/api/instructor/tests',instructorToken,{...template,title:'Масове призначення 1'}).test;
+const t2=api('POST','/api/instructor/tests',instructorToken,{...template,title:'Масове призначення 2'}).test;
+api('POST','/api/results',cadet.token,{testId:t1.id,submissionId:'archive-result',answers:[],durationSeconds:1});
+check('Archive preserves the group, account, accepted results and session',()=>{const r=api('POST',`/api/instructor/groups/${g.id}/archive`,instructorToken,{archived:true,expectedRevision:1});assert.equal(r.group.archived,true);assert.equal(r.group.revision,2);assert.ok(api('GET','/api/groups').groups.some(i=>String(i.id)===String(g.id)));assert.ok(context.findUserById_(cadet.user.id));assert.equal(api('GET','/api/my-results',cadet.token).results.length,1);});
+check('Archived group rejects new registration',()=>assert.throws(()=>api('POST','/api/register','',{groupId:g.id}),e=>e.code==='GROUP_ARCHIVED'));
+check('Cadet cannot archive a group',()=>assert.throws(()=>api('POST',`/api/instructor/groups/${g.id}/archive`,cadet.token,{archived:false,expectedRevision:2}),e=>e.code==='FORBIDDEN'));
+check('Stale archive revision cannot overwrite a newer instructor change',()=>assert.throws(()=>api('POST',`/api/instructor/groups/${g.id}/archive`,instructorToken,{archived:false,expectedRevision:1}),e=>e.code==='REVISION_CONFLICT'));
+check('Archive retry is idempotent',()=>assert.equal(api('POST',`/api/instructor/groups/${g.id}/archive`,instructorToken,{archived:true,expectedRevision:1}).group.revision,2));
+check('Restore enables registration again',()=>{const r=api('POST',`/api/instructor/groups/${g.id}/archive`,instructorToken,{archived:false,expectedRevision:2});assert.equal(r.group.archived,false);assert.equal(r.group.revision,3);});
+const selections=[t1,t2].map(t=>({testId:String(t.id),expectedDescription:t.description}));
+check('Invalid member of a bulk request leaves every test unchanged',()=>{assert.throws(()=>api('POST','/api/instructor/tests/assign',instructorToken,{tests:[selections[0],{testId:'missing',expectedDescription:''}],groupIds:[other.id]}),e=>e.code==='TEST_NOT_FOUND');assert.equal(context.getTestById_(t1.id).description,t1.description);});
+check('Bulk assignment changes exactly the selected tests and group access',()=>{const r=api('POST','/api/instructor/tests/assign',instructorToken,{tests:selections,groupIds:[other.id]});assert.equal(r.assignedCount,2);for(const t of [t1,t2])assert.deepEqual(Array.from(context.assignedGroups_(context.getTestById_(t.id).description)),[other.name]);assert.equal(api('GET','/api/tests',cadet.token).tests.some(t=>String(t.id)===String(t2.id)),false);assert.equal(api('GET','/api/my-results',cadet.token).results.length,1);});
+check('A retry of the same assignment succeeds without losing data',()=>assert.equal(api('POST','/api/instructor/tests/assign',instructorToken,{tests:selections,groupIds:[other.id]}).assignedCount,2));
+check('A stale selection cannot replace changed assignments',()=>assert.throws(()=>api('POST','/api/instructor/tests/assign',instructorToken,{tests:selections,groupIds:[g.id]}),e=>e.code==='REVISION_CONFLICT'));
+check('No empty bulk request can accidentally open tests to everyone',()=>assert.throws(()=>api('POST','/api/instructor/tests/assign',instructorToken,{tests:selections,groupIds:[]}),e=>e.code==='BAD_REQUEST'));
+check('Filtered analytics includes only matching results and detailed answers',()=>{const r=api('GET','/api/instructor/analytics',instructorToken,{groupName:g.name,testId:String(t1.id)});assert.equal(r.attempts,1);assert.ok(r.hardestQuestions.every(i=>String(i.testId)===String(t1.id)));const empty=api('GET','/api/instructor/analytics',instructorToken,{groupName:other.name,testId:String(t1.id)});assert.equal(empty.attempts,0);assert.equal(empty.hardestQuestions.length,0);});
+fs.writeFileSync(new URL('../verification/instructor-tools.json',import.meta.url),JSON.stringify({passed:checks.length,checks,testedAt:new Date().toISOString()},null,2));console.log('Instructor tools: '+checks.length+' passed.');

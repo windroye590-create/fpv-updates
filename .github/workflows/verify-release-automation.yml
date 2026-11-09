@@ -1,0 +1,89 @@
+name: Перевірити автоматизацію випуску
+
+on:
+  push:
+    branches: [main, 'automation/**']
+    paths: ['source/**', 'release-tools/**', 'automation.json', '.github/workflows/release.yml', '.github/workflows/verify-release-automation.yml']
+  pull_request:
+    paths: ['source/**', 'release-tools/**', 'automation.json', '.github/workflows/release.yml', '.github/workflows/verify-release-automation.yml']
+  workflow_dispatch:
+    inputs:
+      check_credentials:
+        description: 'Також перевірити доступ Google і оригінальний ключ (без розгортання)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-setup:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify both portable tools through the raw cache only in Windows PowerShell 5.1
+        shell: powershell
+        run: ./release-tools/setup-automation.ps1 -CheckOnly -CheckBootstrap -MirrorOnly
+      - name: Validate setup in PowerShell 7 without installing tools or signing in
+        shell: pwsh
+        run: ./release-tools/setup-automation.ps1 -CheckOnly
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install Pillow==12.3.0 cryptography==50.0.2 openpyxl==3.1.5
+      - name: Check actual credentials without deployment
+        if: github.event_name == 'workflow_dispatch' && inputs.check_credentials && github.ref == 'refs/heads/main'
+        env:
+          GAS_CREDENTIALS: ${{ secrets.GAS_CREDENTIALS }}
+          LK_SIGNING_PKCS12_BASE64: ${{ secrets.LK_SIGNING_PKCS12_BASE64 }}
+          LK_SIGNING_PASSWORD: ${{ secrets.LK_SIGNING_PASSWORD }}
+        run: |
+          python3 release-tools/release_pipeline.py check-secrets
+          python3 release-tools/appscript_deploy.py check --receipt "$RUNNER_TEMP/setup-check.json"
+      - name: Test deployment rollback, concurrency and publication safeguards
+        run: python3 -m unittest discover -s release-tools/tests -p 'test_*.py'
+      - name: Run application regressions
+        run: npm --prefix source test
+      - name: Build and verify Windows EXE
+        env:
+          COMMISSION_ALLOW_UNCONFIGURED_TEST: '1'
+        working-directory: source
+        run: |
+          python3 build_windows.py
+          python3 tests/validate_pe.py
+          python3 tests/packed_image.py build/FPV-Komisiia-PC.exe --root . --check
+      - name: Verify result layout and startup from EXE
+        working-directory: source
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+          npx playwright install --with-deps chromium
+          node tests/private-storage-ui.mjs
+          node tests/excel-report-ui.mjs
+          node tests/cadet-card-ui.mjs
+          node tests/section-filters-ui.mjs
+          node tests/results-ui.mjs
+          node tests/responsive-ui.mjs
+          node tests/packaged-startup.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: automation-verification
+          path: |
+            source/verification/*.json
+            source/verification/results-actions-layout.png
+            ${{ runner.temp }}/setup-check.json
+          if-no-files-found: warn

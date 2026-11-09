@@ -1,0 +1,244 @@
+[
+  {
+    "file": "sample.docx",
+    "count": 3,
+    "keys": [
+      2,
+      0,
+      1
+    ],
+    "ready": 3
+  },
+  {
+    "file": "sample.xlsx",
+    "count": 3,
+    "keys": [
+      2,
+      0,
+      1
+    ],
+    "ready": 3
+  },
+  {
+    "file": "word-end-keys.docx",
+    "count": 2,
+    "keys": [
+      2,
+      0
+    ],
+    "ready": 2
+  },
+  {
+    "file": "word-no-key.docx",
+    "count": 1,
+    "keys": [
+      -1
+    ],
+    "ready": 0
+  },
+  {
+    "file": "word-unknown-key.docx",
+    "count": 1,
+    "keys": [
+      -1
+    ],
+    "ready": 0,
+    "warnings": true
+  },
+  {
+    "file": "word-conflict.docx",
+    "count": 1,
+    "keys": [
+      -1
+    ],
+    "ready": 0,
+    "warnings": true
+  },
+  {
+    "file": "word-duplicate-number.docx",
+    "count": 2,
+    "keys": [
+      -1,
+      -1
+    ],
+    "ready": 0,
+    "warnings": true
+  },
+  {
+    "file": "word-missing-option.docx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 0
+  },
+  {
+    "file": "word-multiline.docx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1,
+    "contains": "продовження питання"
+  },
+  {
+    "file": "word-extra-key.docx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1,
+    "warnings": true
+  },
+  {
+    "file": "word-200.docx",
+    "count": 200,
+    "ready": 200
+  },
+  {
+    "file": "word-201.docx",
+    "error": "200"
+  },
+  {
+    "file": "word-numbering.docx",
+    "count": 2,
+    "keys": [
+      2,
+      2
+    ],
+    "ready": 2
+  },
+  {
+    "file": "word-style-numbering.docx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "word-table.docx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "word-mixed.docx",
+    "error": "змішано"
+  },
+  {
+    "file": "excel-shared.xlsx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "excel-inline.xlsx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "excel-two-sheets.xlsx",
+    "count": 2,
+    "keys": [
+      2,
+      2
+    ],
+    "ready": 2,
+    "warnings": true
+  },
+  {
+    "file": "excel-no-question.xlsx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 0
+  },
+  {
+    "file": "excel-no-key.xlsx",
+    "count": 1,
+    "keys": [
+      -1
+    ],
+    "ready": 0
+  },
+  {
+    "file": "excel-numeric-key.xlsx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "excel-formula-key.xlsx",
+    "count": 1,
+    "keys": [
+      -1
+    ],
+    "ready": 0,
+    "warnings": true
+  },
+  {
+    "file": "excel-hidden-column.xlsx",
+    "count": 1,
+    "keys": [
+      2
+    ],
+    "ready": 1
+  },
+  {
+    "file": "empty.docx",
+    "error": "Питань не знайдено"
+  },
+  {
+    "file": "legacy.doc",
+    "error": ".docx"
+  },
+  {
+    "file": "wrong-type.xlsx",
+    "error": "Excel"
+  },
+  {
+    "file": "corrupt.docx",
+    "error": "пошкоджено"
+  },
+  {
+    "file": "dtd.docx",
+    "error": "XML"
+  },
+  {
+    "file": "traversal.docx",
+    "error": "шляхи"
+  },
+  {
+    "file": "bomb.docx",
+    "error": "ліміт"
+  },
+  {
+    "file": "deep.docx",
+    "error": "структура"
+  },
+  {
+    "file": "crc.docx",
+    "error": "Пошкоджено"
+  },
+  {
+    "file": "sample-missing.xlsx",
+    "count": 3,
+    "keys": [
+      2,
+      -1,
+      1
+    ],
+    "ready": 2
+  }
+]

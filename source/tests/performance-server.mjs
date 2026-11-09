@@ -1,0 +1,23 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+process.env.LITAKOVA_SERVER_SOURCE=process.env.LITAKOVA_PERF_SERVER_SOURCE||new URL('../Code.gs',import.meta.url).pathname;
+const {context}=await import('./fixtures/server_model.mjs');
+const results=context.sheet_('results'),users=context.sheet_('users'),progress=context.sheet_('materialProgress');
+results.rows=results.rows.slice(0,1);users.rows=users.rows.slice(0,1);progress.rows=progress.rows.slice(0,1);
+const answers=JSON.stringify(Array.from({length:40},(_,i)=>({questionId:'q'+i,answerId:'a'+i})));
+for(let i=0;i<10000;i++)results.appendRow(['r'+i,'c'+(i%2000),'Курсант '+i,'Група','t','Тест',80,8,10,60,'2026-10-18T10:00:00Z',true,'s'+i,answers,0,false]);
+for(let i=0;i<2000;i++)users.appendRow(['c'+i,'u'+i,'Курсант '+i,'Група','cadet','','',true,'']);
+for(let i=0;i<10000;i++)progress.appendRow(['m',1,'c'+(i%2000),2,3,3,'2026-10-18T10:00:00Z','']);
+const proto=Object.getPrototypeOf(results.getRange(2,1)),original=proto.getValues;
+let cells=0,bytes=0;
+proto.getValues=function(){const v=original.call(this);cells+=this.rowCount*this.columnCount;bytes+=Buffer.byteLength(JSON.stringify(v));return v;};
+const report={kind:'isolated_spreadsheet_read_volume',rows:10000};
+const start=performance.now();const listed=context.listResults_(null);
+report.results={ms:Math.round(performance.now()-start),cells,bytes};assert.equal(listed.length,10000);assert.ok(!('answers' in listed[0]));
+context.sheet_('groups').appendRow(['g','Група','','']);
+cells=0;bytes=0;const begin=performance.now();
+const readers=context.materialReaders_({id:'m',revision:1,testId:'t',groupIds:['g'],pageCount:3});
+report.readers={ms:Math.round(performance.now()-begin),cells,bytes,count:readers.readers.length};assert.equal(readers.readers.length,2000);
+// Exercise the reader index with a real matching group as well.
+const r=context.materialReaders_({id:'m',revision:1,testId:'t',groupIds:['g'],pageCount:3});assert.equal(r.readers.length,2000);assert.equal(r.readers[0].lastPage,2);assert.equal(r.readers[0].result.score,80);
+fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});fs.writeFileSync(process.env.LITAKOVA_SERVER_PERF_OUTPUT||new URL('../verification/performance-server.json',import.meta.url),JSON.stringify(report,null,2));console.log(JSON.stringify(report));

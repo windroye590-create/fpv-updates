@@ -1,0 +1,42 @@
+{
+  "name": "fpv-komisiia-pc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/no-retakes.mjs && node tests/result-deletion.mjs && node tests/cadet-deletion.mjs && node tests/contract.mjs && node tests/flows.mjs && node tests/written.mjs && node tests/written-reliability.mjs && node tests/review-audit.mjs && node tests/menu-status.mjs && node tests/session-transitions.mjs && node tests/session-views.mjs && node tests/json-import-safety.mjs && node tests/pc-only.mjs && node tests/auth-recovery.mjs && node tests/login-capacity.mjs && node tests/results.mjs && node tests/large-tests.mjs && node tests/recent-results.mjs && node tests/review-presence.mjs && node tests/test-access-intake.mjs && node tests/public-table-sync.mjs && npm run test:storage-recovery && npm run test:private-storage && npm run test:audit && npm run test:reliability && node tests/cadet-card.mjs && node tests/data-update.mjs && node tests/analytics-requests.mjs && node tests/excel-report.mjs && node tests/public-sheet-v4.mjs && node tests/excel-server.mjs && node tests/commission-owner.mjs",
+    "test:ui": "node tests/ui.mjs && node tests/private-storage-ui.mjs && node tests/excel-report-ui.mjs && node tests/cadet-card-ui.mjs && node tests/section-filters-ui.mjs && node tests/materials-ui.mjs && node tests/written-ui.mjs && node tests/results-ui.mjs && node tests/office.mjs && node tests/responsive-ui.mjs && node tests/updates-ui.mjs && node tests/instructors-ui.mjs && node tests/performance-ui.mjs && node tests/large-tests-ui.mjs && node tests/review-presence-ui.mjs && node tests/test-access-intake-ui.mjs && node tests/public-table-sync-ui.mjs",
+    "build": "python3 build_windows.py",
+    "test:office": "node tests/office.mjs",
+    "test:materials": "node tests/materials-server.mjs",
+    "test:updates": "node tests/updater.mjs && node tests/updates-ui.mjs && python3 tests/update_native.py",
+    "test:responsive": "node tests/responsive-ui.mjs",
+    "test:transfer": "node tests/cadet-transfer.mjs",
+    "test:recent": "node tests/recent-results.mjs",
+    "test:results": "node tests/results.mjs",
+    "test:results-ui": "node tests/results-ui.mjs",
+    "test:instructors": "node tests/instructors-ui.mjs",
+    "test:update-channel": "python3 tests/update_channel.py",
+    "test:account-sync": "node tests/account-sync.mjs",
+    "test:exam-resume": "node tests/exam-resume.mjs",
+    "test:multiple-choice": "node tests/multiple-choice.mjs",
+    "test:deletion": "node tests/test-deletion.mjs",
+    "test:session-transitions": "node tests/session-transitions.mjs",
+    "test:json-import": "node tests/json-import-safety.mjs && node tests/pc-only.mjs",
+    "test:large-tests": "node tests/large-tests.mjs",
+    "test:large-ui": "node tests/large-tests-ui.mjs",
+    "test:intake": "node tests/test-access-intake.mjs && node tests/intake-stress.mjs",
+    "test:intake-ui": "node tests/test-access-intake-ui.mjs",
+    "test:packaged": "python3 tests/packed_image.py build/FPV-Komisiia-PC.exe --root . --check && node tests/packaged-startup.mjs",
+    "test:storage-recovery": "python3 tests/storage-recovery/native-storage.py && node tests/storage-recovery/startup-journal.mjs && node tests/storage-recovery/training-transfer.mjs && node tests/storage-recovery/delivery-faults.mjs && node tests/storage-recovery/access-matrix.mjs && node tests/storage-recovery/instructor-concurrency.mjs && node tests/storage-recovery/training-resume-security.mjs",
+    "test:private-storage": "node tests/private-storage.mjs && node tests/private-storage-server.mjs && python3 tests/storage_json.py && python3 tests/storage_files.py && python3 tests/native_clock.py && node tests/remembered-login.mjs",
+    "test:private-storage-ui": "node tests/private-storage-ui.mjs",
+    "test:audit": "node tests/audit-regressions.mjs && node tests/test-publication.mjs",
+    "test:reliability": "node tests/fix-frontend-reliability.mjs && node tests/fix-server-reliability.mjs && node tests/fix-server-exams.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  },
+  "executableName": "FPV-Komisiia-PC.exe",
+  "versionCode": 1
+}

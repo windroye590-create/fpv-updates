@@ -1,0 +1,8 @@
+/build/
+/verification/
+node_modules/
+__pycache__/
+*.pyc
+/signing/
+.env
+.env.*

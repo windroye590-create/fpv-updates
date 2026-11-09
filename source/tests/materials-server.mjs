@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+process.env.LITAKOVA_SERVER_SOURCE=new URL('../Code.gs',import.meta.url).pathname;
+const {api,context,credential,instructorToken}=await import('./fixtures/server_model.mjs');
+const checks=[];
+function check(label,fn){fn();checks.push(label);console.log('PASS '+label);}
+const group=api('POST','/api/instructor/groups',instructorToken,{name:'Матеріали — 27'}).group;
+const otherGroup=api('POST','/api/instructor/groups',instructorToken,{name:'Матеріали — інша'}).group;
+const cadet=api('POST','/api/register','',{fullName:'Тестовий Курсант Матеріалів',username:'materials-cadet',groupId:group.id,...credential('material-test-secret')});
+const foreign=api('POST','/api/register','',{fullName:'Інша Група Матеріалів',username:'materials-foreign',groupId:otherGroup.id,...credential('material-test-secret')});
+const bytes=Buffer.concat([Buffer.from('%PDF-1.7\n'),crypto.randomBytes(600000),Buffer.from('\n%%EOF\n')]);
+const digest=crypto.createHash('sha256').update(bytes).digest('hex');
+const uploadId=crypto.randomUUID(),body={uploadId,size:bytes.length,sha256:digest};
+const P=24576,parts=Array.from({length:Math.ceil(bytes.length/P)},(_,index)=>({index,data:bytes.subarray(index*P,(index+1)*P).toString('base64')}));
+check('No unauthenticated catalog or uploads',()=>{assert.throws(()=>api('GET','/api/materials'),x=>x.code==='SESSION_EXPIRED');assert.throws(()=>api('POST','/api/instructor/material-uploads',cadet.token,body),x=>x.code==='FORBIDDEN');});
+check('Bounded PDF upload starts and is idempotent',()=>{assert.equal(api('POST','/api/instructor/material-uploads',instructorToken,body).partBytes,P);api('POST','/api/instructor/material-uploads',instructorToken,body);assert.equal(context.dataRows_('materialFiles').filter(r=>r[0]===uploadId).length,1);});
+const publish={title:'Навчальний PDF',topic:'Метеорологія',description:'Матеріал для групи',groupIds:[String(group.id)],uploadId,pageCount:3};
+check('Partial file cannot publish',()=>{api('POST',`/api/instructor/material-uploads/${uploadId}/parts`,instructorToken,{parts:parts.slice(0,16)});assert.throws(()=>api('POST','/api/instructor/materials',instructorToken,publish),x=>x.code==='UPLOAD_INCOMPLETE');assert.equal(api('GET','/api/materials',cadet.token).materials.length,0);});
+check('Chunk retries do not duplicate rows',()=>{api('POST',`/api/instructor/material-uploads/${uploadId}/parts`,instructorToken,{parts:parts.slice(0,16)});assert.equal(context.dataRows_('materialChunks').filter(r=>r[0]===uploadId).length,16);});
+check('Malformed, conflicting, excessive and duplicate chunks rejected',()=>{
+ for(const invalid of [[{index:0,data:'?'.repeat(32768)}],[{index:parts.length,data:parts[0].data}],[parts[0],parts[0]],Array(17).fill(parts[0])])assert.throws(()=>api('POST',`/api/instructor/material-uploads/${uploadId}/parts`,instructorToken,{parts:invalid}),x=>x.code==='INVALID_PART');
+ const conflict={index:0,data:Buffer.alloc(P).toString('base64')};assert.throws(()=>api('POST',`/api/instructor/material-uploads/${uploadId}/parts`,instructorToken,{parts:[conflict]}),x=>x.code==='UPLOAD_CONFLICT');
+});
+for(let i=16;i<parts.length;i+=16)api('POST',`/api/instructor/material-uploads/${uploadId}/parts`,instructorToken,{parts:parts.slice(i,i+16)});
+const item=api('POST','/api/instructor/materials',instructorToken,publish).material;
+check('Only assigned group receives material metadata',()=>{assert.equal(api('GET','/api/materials',cadet.token).materials.some(m=>m.id===item.id),true);assert.equal(api('GET','/api/materials',foreign.token).materials.some(m=>m.id===item.id),false);assert.ok(!('fileId' in item));});
+check('Single-material check returns current metadata without progress or private storage',()=>{const r=api('GET',`/api/materials/${item.id}`,cadet.token,{revision:item.revision});assert.equal(r.material.id,item.id);assert.ok(!('fileId' in r.material));assert.ok(!('progress' in r));});
+check('Single-material check enforces group and current revision',()=>{assert.throws(()=>api('GET',`/api/materials/${item.id}`,foreign.token,{revision:1}),x=>x.code==='MATERIAL_NOT_FOUND');assert.throws(()=>api('GET',`/api/materials/${item.id}`,cadet.token,{revision:999}),x=>x.code==='MATERIAL_CHANGED');});
+check('Single-material check cannot be used without a session',()=>{assert.throws(()=>api('GET',`/api/materials/${item.id}`,'',{revision:1}),x=>x.code==='SESSION_EXPIRED');});
+check('Lost publish reply does not duplicate material',()=>{const again=api('POST','/api/instructor/materials',instructorToken,publish).material;assert.equal(again.id,item.id);assert.equal(again.revision,item.revision);});
+check('Foreign group cannot fetch bytes or write progress',()=>{for(const [method,path,body] of [['GET',`/api/materials/${item.id}/chunks/0`,{revision:item.revision}],['POST',`/api/materials/${item.id}/progress`,{revision:item.revision,lastPage:1,maxPage:1}]])assert.throws(()=>api(method,path,foreign.token,body),x=>x.code==='MATERIAL_NOT_FOUND');});
+check('Content fully reconstructs original PDF with SHA256',()=>{const collected=[];for(let i=0;i<parts.length;i+=16){const r=api('GET',`/api/materials/${item.id}/chunks/${i/16}`,cadet.token,{revision:item.revision});assert.equal(r.sha256,digest);for(const p of r.parts)collected.push(Buffer.from(p.data,'base64'));}assert.deepEqual(Buffer.concat(collected),bytes);});
+check('Stale revision cannot fetch current bytes or report progress',()=>{for(const [method,action,b]of [['GET','chunks/0',{}],['POST','progress',{lastPage:1,maxPage:1}]])assert.throws(()=>api(method,`/api/materials/${item.id}/${action}`,cadet.token,{...b,revision:999}),x=>x.code==='MATERIAL_CHANGED');});
+check('Valid current progress; max page persists when going back',()=>{api('POST',`/api/materials/${item.id}/progress`,cadet.token,{revision:item.revision,lastPage:3,maxPage:3});api('POST',`/api/materials/${item.id}/progress`,cadet.token,{revision:item.revision,lastPage:1,maxPage:1});const r=api('GET',`/api/instructor/materials/${item.id}/progress`,instructorToken).readers.find(r=>r.userId===String(cadet.user.id));assert.equal(r.lastPage,1);assert.equal(r.maxPage,3);assert.ok(r.openedAt);});
+check('Cadets cannot inspect other readers or delete materials',()=>{assert.throws(()=>api('GET',`/api/instructor/materials/${item.id}/progress`,cadet.token),x=>x.code==='FORBIDDEN');assert.throws(()=>api('DELETE',`/api/instructor/materials/${item.id}`,cadet.token,{expectedRevision:1}),x=>x.code==='FORBIDDEN');});
+check('Out-of-range progress rejected without modifying record',()=>{for(const p of [0,4,1.5])assert.throws(()=>api('POST',`/api/materials/${item.id}/progress`,cadet.token,{revision:1,lastPage:p,maxPage:p}),x=>x.code==='INVALID_PROGRESS');});
+const updated=api('POST','/api/instructor/materials',instructorToken,{...item,title:'Нова назва',expectedRevision:item.revision,groupIds:[String(otherGroup.id)]}).material;
+check('Metadata update increments revision and changes group access',()=>{assert.equal(updated.revision,2);assert.ok(!api('GET','/api/materials',cadet.token).materials.some(m=>m.id===item.id));assert.ok(api('GET','/api/materials',foreign.token).materials.some(m=>m.id===item.id));assert.throws(()=>api('POST','/api/instructor/materials',instructorToken,{...item,expectedRevision:1}),x=>x.code==='MATERIAL_CHANGED');});
+check('Deleting requires fresh revision and revokes download',()=>{assert.throws(()=>api('DELETE',`/api/instructor/materials/${item.id}`,instructorToken,{expectedRevision:1}),x=>x.code==='MATERIAL_CHANGED');api('DELETE',`/api/instructor/materials/${item.id}`,instructorToken,{expectedRevision:2});assert.throws(()=>api('GET',`/api/materials/${item.id}/chunks/0`,foreign.token,{revision:2}),x=>x.code==='MATERIAL_NOT_FOUND');});
+check('Full cadet deletion removes learning progress',()=>{assert.ok(context.dataRows_('materialProgress').some(r=>String(r[2])===String(cadet.user.id)));api('DELETE',`/api/instructor/users/${cadet.user.id}`,instructorToken,{confirmUserId:String(cadet.user.id)});assert.ok(!context.dataRows_('materialProgress').some(r=>String(r[2])===String(cadet.user.id)));});
+let second;
+check('Interleaved uploads use distinct reserved row blocks',()=>{
+ const ids=[crypto.randomUUID(),crypto.randomUUID()];
+ for(const id of ids)api('POST','/api/instructor/material-uploads',instructorToken,{...body,uploadId:id});
+ const rows=context.dataRows_('materialFiles').filter(r=>ids.includes(r[0]));assert.ok(Number(rows[0][8])+Number(rows[0][6])<=Number(rows[1][8]));
+ for(let at=0;at<parts.length;at+=16)for(const id of ids)api('POST',`/api/instructor/material-uploads/${id}/parts`,instructorToken,{parts:parts.slice(at,at+16)});
+ for(const id of ids)second=api('POST','/api/instructor/materials',instructorToken,{...publish,uploadId:id,title:'Interleaved '+id,groupIds:[String(otherGroup.id)]}).material;
+ const r=api('GET',`/api/materials/${second.id}/chunks/0`,foreign.token,{revision:1});assert.equal(r.parts[0].data,parts[0].data);
+});
+check('Lost replacement acknowledgement preserves one new revision',()=>{
+ const replacement=crypto.randomUUID();api('POST','/api/instructor/material-uploads',instructorToken,{...body,uploadId:replacement});
+ for(let at=0;at<parts.length;at+=16)api('POST',`/api/instructor/material-uploads/${replacement}/parts`,instructorToken,{parts:parts.slice(at,at+16)});
+ const request={...second,expectedRevision:second.revision,uploadId:replacement};const one=api('POST','/api/instructor/materials',instructorToken,request).material;
+ const two=api('POST','/api/instructor/materials',instructorToken,request).material;assert.equal(one.id,two.id);assert.equal(two.revision,one.revision);second=one;
+});
+check('Reclaiming obsolete byte blocks leaves active presentations intact',()=>{
+ const before=context.dataRows_('materialFiles').length;
+ api('POST','/api/instructor/material-uploads',instructorToken,{...body,uploadId:crypto.randomUUID()});
+ assert.ok(context.dataRows_('materialFiles').length<=before+1);
+ const data=[];for(let at=0;at<parts.length;at+=16){const r=api('GET',`/api/materials/${second.id}/chunks/${at/16}`,foreign.token,{revision:second.revision});for(const p of r.parts)data.push(Buffer.from(p.data,'base64'));}assert.deepEqual(Buffer.concat(data),bytes);
+});
+fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});fs.writeFileSync(new URL('../verification/materials-server.json',import.meta.url),JSON.stringify({kind:'isolated_server_logic',passed:checks.length,checks},null,2));

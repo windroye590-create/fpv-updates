@@ -1,0 +1,53 @@
+name: Перевірити сховище справжнього Windows EXE
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Випустити EXE та Apps Script']
+    types: [completed]
+  push:
+    branches: [main]
+    paths: ['channel/FPV-Komisiia-PC.exe', 'source/tests/windows-private-storage.py', '.github/workflows/windows-native-audit.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  private-storage:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Check the published executable against its update catalog
+        shell: pwsh
+        run: |
+          $fields = @{}
+          Get-Content channel/updates.txt | Select-Object -Skip 2 | ForEach-Object {
+            $pair = $_ -split '=', 2
+            if ($pair.Length -eq 2) { $fields[$pair[0]] = $pair[1] }
+          }
+          $exe = Get-Item channel/FPV-Komisiia-PC.exe
+          $digest = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $fields['windows.sha256'] -or $exe.Length -ne [long]$fields['windows.size']) {
+            throw 'The Windows EXE does not match the published catalog'
+          }
+          Write-Output "Verified published version $($fields['windows.name']) ($digest)"
+      - name: Exercise real CNG, DPAPI, backup recovery and saved login
+        shell: pwsh
+        run: python source/tests/windows-private-storage.py channel/FPV-Komisiia-PC.exe windows-private-storage.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: windows-native-storage-audit
+          path: windows-private-storage.json
+          if-no-files-found: warn

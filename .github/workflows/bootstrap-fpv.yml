@@ -1,0 +1,52 @@
+name: Підключити власника FPV Комісії
+on:
+  workflow_dispatch:
+    inputs:
+      invite_hash:
+        description: SHA-256 одноразового коду власника (сам код залишається на ПК)
+        required: true
+        type: string
+      invite_until:
+        description: Термін дії коду, Unix milliseconds
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: fpv-owner-bootstrap
+  cancel-in-progress: false
+jobs:
+  provision:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install cryptography==50.0.2
+      - name: Verify the owner and provision separate FPV resources
+        env:
+          GAS_CREDENTIALS: ${{ secrets.GAS_CREDENTIALS }}
+          LK_SIGNING_PKCS12_BASE64: ${{ secrets.LK_SIGNING_PKCS12_BASE64 }}
+          LK_SIGNING_PASSWORD: ${{ secrets.LK_SIGNING_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
+          OWNER_INVITE_HASH: ${{ inputs.invite_hash }}
+          OWNER_INVITE_UNTIL: ${{ inputs.invite_until }}
+        run: python3 release-tools/bootstrap_commission.py --invite-hash "$OWNER_INVITE_HASH" --invite-until "$OWNER_INVITE_UNTIL"
+      - name: Show the FPV owner authorization link
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('bootstrap-state.json')
+          if p.exists():
+              v=json.loads(p.read_text())
+              if v.get('scriptUrl'):
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write('\nВласник FPV відкриває [редактор Google]('+v['scriptUrl']+') і запускає `setupCommission` для одноразового надання доступу до таблиць.\n')
+          PY

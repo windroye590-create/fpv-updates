@@ -1,0 +1,24 @@
+name: Перевірити підписаний канал (публікація в release.yml)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-windows-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify signed bundle
+        run: python3 release-tools/github_release.py channel --verify-only
+      - name: Verify publication safeguards
+        run: python3 -m unittest discover -s release-tools/tests -p 'test_*.py'

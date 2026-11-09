@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+process.env.LITAKOVA_SERVER_SOURCE=new URL('../Code.gs',import.meta.url).pathname;
+const {context,api,instructorToken,credential}=await import('./fixtures/server_model.mjs');
+const checks=[];function check(name,run){run();checks.push(name);console.log('PASS '+name);}
+const group=api('POST','/api/instructor/groups',instructorToken,{name:'Private storage isolated group'}).group;
+const one=api('POST','/api/register','',{fullName:'Private storage cadet one',username:'private_storage_one',groupId:group.id,...credential('Private-password-one')});
+const two=api('POST','/api/register','',{fullName:'Private storage cadet two',username:'private_storage_two',groupId:group.id,...credential('Private-password-two')});
+const teacher=api('GET','/api/workspace',instructorToken).user;
+const key=token=>api('GET','/api/local-storage/key',token);
+const authorize=(token,userId,nonce='ab'.repeat(32))=>JSON.parse(context.doPost({postData:{contents:JSON.stringify({action:'local-storage-authorize',token,userId,nonce})}}).text);
+check('An instructor receives only its own stable 256-bit local storage key',()=>{const a=key(instructorToken);assert.equal(a.localStorageProtocol,2);assert.equal(a.userId,String(teacher.id));assert.match(a.key,/^[a-f0-9]{64}$/);assert.equal(key(instructorToken).key,a.key);});
+check('Cadets receive distinct own keys and cannot choose a foreign owner in the body',()=>{const a=key(one.token),b=key(two.token),foreign=api('GET','/api/local-storage/key',one.token,{userId:teacher.id});assert.notEqual(a.key,b.key);assert.notEqual(a.key,key(instructorToken).key);assert.equal(foreign.userId,String(one.user.id));assert.equal(foreign.key,a.key);});
+check('Anonymous and forged sessions never receive a local key',()=>{for(const token of ['','invalid.token'])assert.throws(()=>key(token),e=>e.code==='SESSION_EXPIRED');});
+check('A renewed signed session retains the same storage key',()=>{const before=key(one.token);const fresh=context.issueToken_(context.findUserById_(one.user.id));assert.equal(key(fresh).key,before.key);});
+check('Password changes preserve the account key and invalidate the old bearer session',()=>{const before=key(one.token);api('POST','/api/instructor/users/'+one.user.id+'/password',instructorToken,credential('Changed-private-password'));assert.throws(()=>key(one.token),e=>e.code==='SESSION_EXPIRED');one.token=context.issueToken_(context.findUserById_(one.user.id));assert.equal(key(one.token).key,before.key);});
+check('Native migration authorization returns exactly the fresh owner-bound nonce',()=>{const nonce=crypto.randomBytes(32).toString('hex');assert.deepEqual(authorize(instructorToken,teacher.id,nonce),{ok:true,localStorageAuthorization:nonce});assert.deepEqual(authorize(one.token,one.user.id,nonce),{ok:true,localStorageAuthorization:nonce});});
+check('A cadet cannot authorize an instructor or another cadet local archive',()=>{for(const id of [teacher.id,two.user.id])assert.equal(authorize(one.token,id).code,'FORBIDDEN');});
+check('An instructor cannot authorize another instructor-owned local account',()=>{assert.equal(authorize(instructorToken,'different-owner').code,'FORBIDDEN');});
+check('Expired sessions cannot authorize migration and malformed nonces are rejected',()=>{assert.equal(authorize('invalid.token',teacher.id).code,'SESSION_EXPIRED');for(const nonce of ['','a'.repeat(63),'g'.repeat(64),'ab'.repeat(32)+'injected'])assert.equal(authorize(instructorToken,teacher.id,nonce).code,'FORBIDDEN');});
+check('A role change cannot reuse a key derived for the previous role',()=>{const before=key(two.token);const user=context.findUserById_(two.user.id),sheet=context.sheet_('users');sheet.getRange(user.rowNumber,5).setValue('instructor');assert.throws(()=>key(two.token),e=>e.code==='SESSION_EXPIRED');const renewed=context.issueToken_(context.findUserById_(two.user.id));assert.notEqual(key(renewed).key,before.key);sheet.getRange(user.rowNumber,5).setValue('cadet');});
+check('Disabled owners cannot authorize archive reads',()=>{const user=context.findUserById_(two.user.id);context.sheet_('users').getRange(user.rowNumber,8).setValue(false);assert.equal(authorize(two.token,two.user.id).code,'SESSION_EXPIRED');assert.throws(()=>key(two.token),e=>e.code==='SESSION_EXPIRED');});
+check('The key and authorization paths do not disclose the commission signing secret',()=>{const secret=context.PropertiesService.getScriptProperties().getProperty('APP_SECRET');assert.ok(secret);assert.equal(JSON.stringify(key(instructorToken)).includes(secret),false);assert.equal(JSON.stringify(authorize(instructorToken,teacher.id)).includes(secret),false);});
+fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});fs.writeFileSync(new URL('../verification/private-storage-server.json',import.meta.url),JSON.stringify({status:'passed',passed:checks.length,checks,actualCodeExecuted:'Code.gs API22 with isolated Sheets model',productionRequests:0},null,2));console.log('Private storage server: '+checks.length+' checks passed.');

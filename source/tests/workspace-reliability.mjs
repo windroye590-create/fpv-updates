@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {readWorkspace,workspaceRequest} from '../web/workspace.js';
+import {createDurableWriter} from '../web/durability.js';
+process.env.LITAKOVA_SERVER_SOURCE=new URL('../Code.gs',import.meta.url).pathname;
+const {api,instructorToken,context}=await import('./fixtures/server_model.mjs');
+const checks=[];async function check(n,f){await f();checks.push(n);}
+const first=api('GET','/api/workspace',instructorToken,{});
+await check('Authenticated initial snapshot contains all four instructor sections',()=>assert.deepEqual(Object.keys(first.changes).sort(),['cadets','groups','results','tests']));
+const quiet=api('GET','/api/workspace',instructorToken,{known:first.revisions});
+await check('Unchanged snapshot sends no arrays',()=>assert.deepEqual(quiet.changes,{}));
+await check('No anonymous workspace reads',()=>assert.throws(()=>api('GET','/api/workspace',''),e=>e.code==='SESSION_EXPIRED'));
+await check('Mutation invalidates the changed section',()=>{api('POST','/api/instructor/groups',instructorToken,{name:'Revision test group'});const r=api('GET','/api/workspace',instructorToken,{known:first.revisions});assert.deepEqual(Object.keys(r.changes),['groups','tests']);});
+await check('Full results require a distinct cursor',()=>assert.ok(api('GET','/api/workspace',instructorToken,{known:first.revisions,allResults:true}).changes.results));
+await check('Read during a mutation cannot acknowledge a stable snapshot',()=>{const p=context.PropertiesService.getScriptProperties(),lock=context.LockService.getScriptLock(),tryLock=lock.tryLock;p.setProperty('LK_WORKSPACE_WRITE','testing');lock.tryLock=()=>false;try{assert.equal(api('GET','/api/workspace',instructorToken,{}).snapshotStable,false);}finally{lock.tryLock=tryLock;p.deleteProperty('LK_WORKSPACE_WRITE');}});
+await check('Client rejects a foreign authenticated user',()=>assert.throws(()=>readWorkspace(first,{user:{...first.user,id:'foreign'}}),e=>e.code==='BAD_WORKSPACE'));
+await check('Client rejects malformed changed arrays',()=>assert.throws(()=>readWorkspace({...first,changes:{groups:{}}},{user:first.user}),e=>e.code==='BAD_WORKSPACE'));
+await check('Cadet cannot accept another cadet result',()=>assert.throws(()=>readWorkspace({...first,user:{id:7,role:'cadet'},changes:{results:[{userId:8}]}},{user:{id:7,role:'cadet'}}),e=>e.code==='BAD_WORKSPACE'));
+await check('Manual and periodic refreshes bypass cursors',()=>{const a={workspaceFullAt:100,workspaceRevisions:{tests:'revision'}};assert.deepEqual(workspaceRequest(a,false,false,101).known,a.workspaceRevisions);assert.deepEqual(workspaceRequest(a,false,true,101).known,{});assert.deepEqual(workspaceRequest(a,false,false,300101).known,{});});
+await check('A failed disk write remains dirty until a successful retry',async()=>{let fail=true;const w=createDurableWriter(async()=>{if(fail)throw Error('disk full');});await assert.rejects(w.save(),/disk full/);assert.equal(w.status().pending,true);assert.equal(w.status().error,'disk full');fail=false;await w.save();assert.equal(w.status().pending,false);assert.equal(w.status().error,'');});
+await check('An older write cannot claim that a newer queued write is saved',async()=>{const releases=[];const w=createDurableWriter(()=>new Promise(r=>releases.push(r)));const a=w.save();await new Promise(r=>setImmediate(r));const b=w.save();releases.shift()();await a;assert.equal(w.status().pending,true);await new Promise(r=>setImmediate(r));releases.shift()();await b;assert.equal(w.status().pending,false);});
+fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});
+const performance={initialBytes:JSON.stringify(first).length,unchangedBytes:JSON.stringify(quiet).length};performance.savedPercent=Math.round(100*(1-performance.unchangedBytes/performance.initialBytes));
+assert.ok(performance.savedPercent>80);
+fs.writeFileSync(new URL('../verification/workspace-reliability.json',import.meta.url),JSON.stringify({passed:checks.length,checks,performance,testedAt:new Date().toISOString()},null,2));
+console.log('Workspace and reliability: '+checks.length+' checks; unchanged payload '+performance.savedPercent+'% smaller.');
