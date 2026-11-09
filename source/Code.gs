@@ -7,10 +7,10 @@
  * версію того самого веб-додатка. Повторне налаштування не потрібне.
  */
 
-const SPREADSHEET_ID = 'FPV_DATABASE_NOT_CONNECTED';
+const SPREADSHEET_ID = '1681BlupvfIfWmQKy1BiGK8SOFpd7guAtaH20nn_5g64';
 // Only the owner receives the random first-registration code. Its hash may be public.
-const OWNER_SETUP_INVITE_HASH = '';
-const OWNER_SETUP_INVITE_UNTIL = 0;
+const OWNER_SETUP_INVITE_HASH = '00750c25cc5a6a48428e671917bee2604a2ab43e6bde2a4d017c8d13ed6eb2c1';
+const OWNER_SETUP_INVITE_UNTIL = 1794337368008;
 const OWNER_SETUP_LOGIN = 'WindRoy';
 const API_VERSION = 26;
 const PUBLIC_SYNC_COLUMN = 27;
@@ -122,7 +122,7 @@ function doGet() {
     ok: true,
     service: 'FPV Комісія',
     version: API_VERSION,
-    serverBuild: 'pc-api26-947b7e891f5e9135',
+    serverBuild: 'pc-api26-acac48e64011cc1f',
     resultDeletion: true,
     singleAttempt: true,
     privateLocalStorage: true,

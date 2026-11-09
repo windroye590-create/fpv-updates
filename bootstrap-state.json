@@ -1,5 +1,7 @@
 {
   "commission": "fpv",
-  "phase": "script_created",
-  "scriptUrl": "https://script.google.com/home/projects/1Tb-WkixPJYD7AcdcqlxvrjN9eFhrzVE8VZ7eu2GXsa_W8NuPEMM_qZzq/edit"
+  "phase": "source_pending",
+  "scriptUrl": "https://script.google.com/home/projects/1Tb-WkixPJYD7AcdcqlxvrjN9eFhrzVE8VZ7eu2GXsa_W8NuPEMM_qZzq/edit",
+  "previousSourceSha256": null,
+  "sourceSha256": "61d43dc86bb7eb58e1ee1a3966592697d66ada5941e411cdb2be6cb5fecffeed"
 }
