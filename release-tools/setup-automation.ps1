@@ -180,7 +180,9 @@ function Read-FPVSigning([string]$Folder, [Security.SecureString]$NewPassword = 
     Set-Acl -LiteralPath $Folder -AclObject $acl
     $keyPath = Join-Path $Folder 'fpv-release.p12'
     $passwordPath = Join-Path $Folder 'signing-password.dpapi'
-    if ((Test-Path -LiteralPath $keyPath) -ne (Test-Path -LiteralPath $passwordPath)) { throw 'The local FPV key backup is incomplete. Restore both files before continuing.' }
+    $password = $null
+    $savePassword = $false
+    if (-not (Test-Path -LiteralPath $keyPath) -and (Test-Path -LiteralPath $passwordPath)) { throw 'Restore the original FPV P12 backup before continuing; its private key is missing.' }
     if (-not (Test-Path -LiteralPath $keyPath)) {
         if ($null -eq $NewPassword) { $NewPassword = Read-Host 'Choose a private FPV signing backup password (16+ characters; keep it with your backup)' -AsSecureString }
         $password = [Net.NetworkCredential]::new('',$NewPassword).Password
@@ -191,11 +193,17 @@ function Read-FPVSigning([string]$Folder, [Security.SecureString]$NewPassword = 
             $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1),[DateTimeOffset]::UtcNow.AddYears(20))
             try { $bytes = $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,$password) } finally { $certificate.Dispose() }
         } finally { $rsa.Dispose() }
-        $protected = [Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($password),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-        [IO.File]::WriteAllBytes($passwordPath,$protected)
         [IO.File]::WriteAllBytes($keyPath,$bytes)
+        $savePassword = $true
     }
-    $password = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($passwordPath),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser))
+    if ($null -eq $password -and (Test-Path -LiteralPath $passwordPath)) {
+        try { $password = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($passwordPath),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)) } catch { $password = $null }
+    }
+    if ($null -eq $password) {
+        if ($null -eq $NewPassword) { $NewPassword = Read-Host 'Enter the original password for the restored FPV P12 backup' -AsSecureString }
+        $password = [Net.NetworkCredential]::new('',$NewPassword).Password
+        $savePassword = $true
+    }
     $bytes = [IO.File]::ReadAllBytes($keyPath)
     $flags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
     $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes,$password,$flags)
@@ -205,6 +213,10 @@ function Read-FPVSigning([string]$Folder, [Security.SecureString]$NewPassword = 
         $sha = [Security.Cryptography.SHA256]::Create()
         try { $fingerprint = [BitConverter]::ToString($sha.ComputeHash($certificate.RawData)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
     } finally { $certificate.Dispose() }
+    if ($savePassword) {
+        $protected = [Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($password),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+        [IO.File]::WriteAllBytes($passwordPath,$protected)
+    }
     return @{ Key=[Convert]::ToBase64String($bytes); Password=$password; Fingerprint=$fingerprint; Path=$keyPath }
 }
 
@@ -223,6 +235,12 @@ if ($CheckOnly) {
         $a = Read-FPVSigning $scratch (ConvertTo-SecureString 'test-only-fpv-key-password' -AsPlainText -Force)
         $b = Read-FPVSigning $scratch
         if ($a.Key -ne $b.Key -or $a.Fingerprint -ne $b.Fingerprint -or $a.Fingerprint.Length -ne 64) { throw 'FPV key retry changed its identity.' }
+        Remove-Item -LiteralPath (Join-Path $scratch 'signing-password.dpapi')
+        $wrongRejected = $false
+        try { [void](Read-FPVSigning $scratch (ConvertTo-SecureString 'wrong-original-password' -AsPlainText -Force)) } catch { $wrongRejected = $true }
+        if (-not $wrongRejected) { throw 'An incorrect restore password was accepted.' }
+        $restored = Read-FPVSigning $scratch (ConvertTo-SecureString 'test-only-fpv-key-password' -AsPlainText -Force)
+        if ($restored.Key -ne $a.Key -or $restored.Fingerprint -ne $a.Fingerprint) { throw 'Restoring a P12 must retain the original FPV key.' }
         if (([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Join-Path $scratch 'signing-password.dpapi')))).Contains($a.Password)) { throw 'The cached key password must be DPAPI protected.' }
     } finally { if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force } }
     if ($CheckBootstrap) { Test-PortableBootstrap }
