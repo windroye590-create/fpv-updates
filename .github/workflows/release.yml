@@ -51,6 +51,7 @@ jobs:
         run: |
           python3 -m unittest discover -s release-tools/tests -p 'test_*.py'
           npm --prefix source test
+          python3 source/tests/update_protocol.py
       - name: Build and verify the actual Windows image
         working-directory: source
         run: |
