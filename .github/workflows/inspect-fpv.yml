@@ -1,0 +1,36 @@
+name: Перевірити доступ власника FPV
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Read the existing FPV project and owner metadata
+        env:
+          GAS_CREDENTIALS: ${{ secrets.GAS_CREDENTIALS }}
+        run: |
+          python3 - <<'PY'
+          import json,os,sys
+          from urllib.parse import urlencode
+          from urllib.request import Request
+          sys.path.insert(0,'release-tools')
+          from appscript_deploy import config,Google,read_json
+          settings=config();client=Google(os.environ['GAS_CREDENTIALS'])
+          base='/v1/projects/'+settings['scriptId']
+          project=client.call('GET',base)
+          deployment=client.call('GET',base+'/deployments/'+settings['deploymentId'])
+          title=project['title'].replace("'","\\'")
+          query="trashed=false and mimeType='application/vnd.google-apps.script' and name='"+title+"'"
+          files=read_json(Request('https://www.googleapis.com/drive/v3/files?'+urlencode({'q':query,'fields':'files(id,name,webViewLink,owners(emailAddress))','pageSize':100}),headers={'Authorization':'Bearer '+client.token})).get('files',[])
+          report={'status':'found','scriptId':project['scriptId'],'title':project['title'],'creator':project.get('creator',{}).get('email'),'expectedOwner':settings['ownerEmail'],'editorUrl':'https://script.google.com/home/projects/'+project['scriptId']+'/edit?authuser='+settings['ownerEmail'],'driveFiles':files,'webApps':[e.get('webApp') for e in deployment.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']}
+          print(json.dumps(report,ensure_ascii=False))
+          PY
