@@ -3,9 +3,11 @@ import copy
 import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -94,5 +96,37 @@ class SigningTests(unittest.TestCase):
             self.assertEqual((boot.ROOT/'release-tools/update-public.pem').read_bytes(),key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
             p['signing']['certificateSha256']='0'*64
             with self.assertRaisesRegex(ValueError,'must be preserved'):boot.pin_signing(p,wire,'test-password')
+
+class CheckpointTests(unittest.TestCase):
+    def test_real_git_checkpoints_record_both_resource_ids_and_resume_without_duplicate_commits(self):
+        profile=json.loads((boot.ROOT/'profiles/fpv.json').read_text());profile['cloud']['spreadsheetId']='fpv-checkpoint-database'
+        with tempfile.TemporaryDirectory() as directory:
+            remote=Path(directory)/'remote.git';working=Path(directory)/'working';working.mkdir()
+            def run(*args,cwd=working):return subprocess.check_output(['git',*args],cwd=cwd,stderr=subprocess.DEVNULL,text=True).strip()
+            run('init','--bare',str(remote));run('init','-b','main');run('remote','add','origin',str(remote))
+            for name in ['source/Code.gs','source/web/core.js','source/native/main.c','source/native/update_key.h','release-tools/update-public.pem']:
+                p=working/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('synthetic source')
+            (working/'automation.json').write_bytes((boot.ROOT/'automation.json').read_bytes());(working/'private-untracked.txt').write_text('must remain outside the commit')
+            state={'phase':'database_created'}
+            with patch.object(boot,'ROOT',working),patch.dict(os.environ,{'GITHUB_TOKEN':'synthetic-checkpoint-token'}):
+                boot.checkpoint(profile,state);first=run('rev-parse','HEAD')
+                self.assertEqual(run('rev-parse','refs/heads/main',cwd=remote),first)
+                self.assertEqual(json.loads(run('show','HEAD:commission.json'))['cloud']['spreadsheetId'],profile['cloud']['spreadsheetId'])
+                self.assertNotIn('private-untracked.txt',run('ls-tree','--name-only','HEAD'))
+                boot.checkpoint(profile,state);self.assertEqual(run('rev-parse','HEAD'),first)
+                profile['cloud']['scriptId']='fpv-checkpoint-script';state['phase']='script_created';boot.checkpoint(profile,state)
+                self.assertNotEqual(run('rev-parse','HEAD'),first)
+                self.assertEqual(json.loads(run('show','HEAD:bootstrap-state.json'))['phase'],'script_created')
+                self.assertEqual(run('rev-parse','refs/heads/main',cwd=remote),run('rev-parse','HEAD'))
+
+    def test_git_authentication_uses_a_scoped_environment_header_and_preserves_existing_config(self):
+        environment={'GITHUB_TOKEN':'synthetic-private-token','GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'core.quotepath','GIT_CONFIG_VALUE_0':'false'}
+        with patch.dict(os.environ,environment),patch.object(boot.subprocess,'check_output',return_value='ok\n') as call:
+            self.assertEqual(boot.git('push','origin','HEAD:main',authenticated=True),'ok')
+            args=call.call_args;self.assertNotIn('synthetic-private-token',' '.join(args.args[0]))
+            self.assertEqual(args.kwargs['env']['GIT_CONFIG_COUNT'],'2')
+            self.assertEqual(args.kwargs['env']['GIT_CONFIG_KEY_0'],'core.quotepath')
+            self.assertEqual(args.kwargs['env']['GIT_CONFIG_KEY_1'],'http.https://github.com/.extraheader')
+            self.assertTrue(args.kwargs['env']['GIT_CONFIG_VALUE_1'].startswith('AUTHORIZATION: basic '))
 
 if __name__=='__main__':unittest.main()

@@ -12,13 +12,13 @@ import os
 from pathlib import Path
 import re
 import struct
+import subprocess
 import time
 from urllib.parse import urlencode
 from urllib.request import Request
 
 import appscript_deploy as gas
 import github_release as releases
-import release_pipeline as pipeline
 
 ROOT=Path(__file__).resolve().parents[1]
 OLD_DATABASE='1acfLVVoxCYs75ruUgTEIvwBLgb072QVz1MgEIW2b1sI'
@@ -28,6 +28,14 @@ def require(value,message):
     if not value:raise ValueError(message)
 
 def write_json(path,value):path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+
+def git(*args,authenticated=False):
+    environment=dict(os.environ)
+    if authenticated:
+        token=environment['GITHUB_TOKEN']
+        index=int(environment.get('GIT_CONFIG_COUNT','0'))
+        environment.update({'GIT_CONFIG_COUNT':str(index+1),'GIT_CONFIG_KEY_'+str(index):'http.https://github.com/.extraheader','GIT_CONFIG_VALUE_'+str(index):'AUTHORIZATION: basic '+base64.b64encode(('x-access-token:'+token).encode()).decode()})
+    return subprocess.check_output(['git',*args],cwd=ROOT,env=environment,text=True).strip()
 
 class OwnerGoogle:
     def __init__(self,credential):
@@ -45,10 +53,10 @@ def checkpoint(profile,state):
     settings.update({k:v for k,v in profile['cloud'].items() if v});settings['ownerEmail']=profile['ownerEmail']
     write_json(ROOT/'automation.json',settings);write_json(ROOT/'bootstrap-state.json',state)
     paths=['commission.json','source/commission.json','automation.json','bootstrap-state.json','source/Code.gs','source/web/core.js','source/native/main.c','source/native/update_key.h','release-tools/update-public.pem']
-    pipeline.git('add','--',*paths)
-    if pipeline.git('diff','--cached','--name-only'):
-        pipeline.git('-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','Configure isolated FPV owner resources')
-        pipeline.git('push','origin','HEAD:main',authenticated=True)
+    git('add','--',*paths)
+    if git('diff','--cached','--name-only'):
+        git('-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','Configure isolated FPV owner resources')
+        git('push','origin','HEAD:main',authenticated=True)
 
 def pin_signing(profile,encoded,password):
     from cryptography.hazmat.primitives import hashes,serialization
