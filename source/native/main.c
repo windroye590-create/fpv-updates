@@ -9,6 +9,8 @@
 #define MAX_JOURNAL_BODY MAX_BODY
 #define MAX_HEADER 16384u
 #define TITLE L"FPV Комісія — ПК"
+#define LOCAL_PORT 18748u
+#define LOCAL_URL_PREFIX L"http://127.0.0.1:18748/?key="
 static char launch_key[65],host[64];
 static WCHAR directory[1024],state_path[1100],temp_path[1100],launch_path[1100],journal_path[1100],journal_temp[1100];
 static CRITICAL_SECTION store_lock;
@@ -162,22 +164,39 @@ static int launch_browser(const WCHAR*url){
   if(!base_length||base_length>900)continue;
   wcopy(app,base);wcat(app,paths[kind]);
   if(GetFileAttributesW(app)==0xffffffffu)continue;
-  wcopy(params,L"--no-first-run --no-default-browser-check --app=\"");wcat(params,url);wcat(params,L"\" --window-size=1360,900");
+  wcopy(params,L"--no-first-run --no-default-browser-check --disable-background-mode --user-data-dir=\"");wcat(params,directory);wcat(params,L"\\browser\" --app=\"");wcat(params,url);wcat(params,L"\" --window-size=1360,900");
   if((QWORD)ShellExecuteW(0,L"open",app,params,0,1)>32){release(memory);return 1;}
  }
  release(memory);return (QWORD)ShellExecuteW(0,L"open",url,0,0,1)>32;
 }
-static int open_existing(void){
- WCHAR url[180]={0};DWORD done=0;
+static int read_launch_url(WCHAR*url,const WCHAR*prefix){
+ DWORD done=0;zero(url,180u*2u);
  HANDLE file=CreateFileW(launch_path,0x80000000u,1,0,3,0x80,0);
  if(file==INVALID_HANDLE)return 0;
- BOOL ok=ReadFile(file,url,sizeof(url)-2,&done,0);CloseHandle(file);
- const WCHAR*prefix=L"http://127.0.0.1:18747/?key=";UINT at=0;
+ BOOL ok=ReadFile(file,url,358u,&done,0);CloseHandle(file);UINT at=0;
  if(!ok)return 0;
  while(prefix[at]){if(url[at]!=prefix[at])return 0;at++;}
+ if(done!=(at+65u)*2u)return 0;
  for(UINT i=0;i<64;i++){WCHAR c=url[at+i];if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return 0;}
  if(url[at+64])return 0;
- return launch_browser(url);
+ return 1;
+}
+static int open_existing(void){
+ WCHAR url[180];return read_launch_url(url,LOCAL_URL_PREFIX)&&launch_browser(url);
+}
+static BOOL close_migrated_window(HANDLE window,QWORD unused){
+ (void)unused;WCHAR text[96],kind[48];
+ if(GetWindowTextW(window,text,96)&&GetClassNameW(window,kind,48)&&update_wsame(text,L"FPV Комісія | ПК")&&update_wsame(kind,L"Chrome_WidgetWin_1")){
+  QWORD result=0;SendMessageTimeoutW(window,0x0010u,0,0,2u,1000u,&result);
+ }
+ return 1;
+}
+static int migrating_browser(void){
+ WCHAR url[180];const WCHAR*prefix=L"http://127.0.0.1:18747/?key=";
+ if(!read_launch_url(url,prefix))return 0;
+ UINT at=0;while(prefix[at])at++;
+ for(UINT i=0;i<64;i++)if(url[at+i]!=(BYTE)launch_key[i])return 0;
+ return 1;
 }
 void mainCRTStartup(void){
  process_heap=GetProcessHeap();InitializeCriticalSection(&store_lock);
@@ -186,12 +205,13 @@ void mainCRTStartup(void){
  wcat(directory,L"\\FPVKomisiiaPC");CreateDirectoryW(directory,0);wcopy(state_path,directory);wcat(state_path,L"\\profile-v2.bin");wcopy(temp_path,directory);wcat(temp_path,L"\\profile-v2.tmp");wcopy(launch_path,directory);wcat(launch_path,L"\\launch.txt");
  wcopy(journal_path,directory);wcat(journal_path,L"\\journal-v2.meta.bin");wcopy(journal_temp,directory);wcat(journal_temp,L"\\journal-v2.meta.tmp");
  update_init();int argc=0;WCHAR**argv=CommandLineToArgvW(GetCommandLineW(),&argc);int helper=argv?update_helper(argc,argv):0;int resumed=!helper&&argv?update_resume(argc,argv):0;if(argv)LocalFree(argv);if(helper)ExitProcess(0);if(resumed<0){MessageBoxW(0,L"Не вдалося відновити вікно після оновлення. Запустіть програму знову.",TITLE,48);ExitProcess(1);}
+ int migrate=resumed&&migrating_browser();
  storage_ready=sl_initialize();
  icon_refresh_start();
  if(!resumed){BYTE random[32];if(BCryptGenRandom(0,random,32,2)<0){MessageBoxW(0,L"Не вдалося створити захищений сеанс.",TITLE,16);ExitProcess(1);}
  const char*hex="0123456789abcdef";for(UINT i=0;i<32;i++){launch_key[i*2]=hex[random[i]>>4];launch_key[i*2+1]=hex[random[i]&15];}}
  BYTE wsa[512];if(WSAStartup(0x0202,wsa)){MessageBoxW(0,L"Не вдалося запустити мережевий модуль Windows.",TITLE,16);ExitProcess(1);}
- SOCKADDR_IN address;zero(&address,sizeof(address));address.family=2;address.address=htonl(0x7f000001);UINT port=18747;address.port=htons((WORD)port);
+ SOCKADDR_IN address;zero(&address,sizeof(address));address.family=2;address.address=htonl(0x7f000001);UINT port=LOCAL_PORT;address.port=htons((WORD)port);
  SOCKET server=INVALID_SOCKET;
  for(UINT retry=0;;retry++){
   server=socket(2,1,6);DWORD exclusive=1;
@@ -206,7 +226,11 @@ void mainCRTStartup(void){
  char url8[160];char*x=append(host,"127.0.0.1:");decimal(x,port);x=append(url8,"http://");x=append(x,host);x=append(x,"/?key=");append(x,launch_key);WCHAR url[180];widen(url,url8);
  HANDLE launch_file=CreateFileW(launch_path,0x40000000u,1,0,2,0x80,0);
  if(launch_file!=INVALID_HANDLE){DWORD length=0,done=0;while(url[length])length++;WriteFile(launch_file,url,(length+1)*2,&done,0);CloseHandle(launch_file);}
- if(!resumed&&!launch_browser(url)){MessageBoxW(0,L"Для інтерфейсу потрібен Microsoft Edge або Google Chrome.",TITLE,16);ExitProcess(1);}
+ /* Version 1.0.0 shared the other commission's origin. Its acknowledged
+  * update has saved all work and stopped the old host. Open the new origin
+  * in this edition's browser profile instead of reusing the obsolete page. */
+ if(migrate)EnumWindows(close_migrated_window,0);
+ if((!resumed||migrate)&&!launch_browser(url)){MessageBoxW(0,L"Для інтерфейсу потрібен Microsoft Edge або Google Chrome.",TITLE,16);ExitProcess(1);}
  last_ping=GetTickCount64();QWORD last_poll=last_ping;
  for(;;){if(__atomic_load_n(&update_restart_requested,__ATOMIC_SEQ_CST))break;QWORD now=GetTickCount64();if(now-__atomic_load_n(&update_checked_at,__ATOMIC_SEQ_CST)>21600000u&&!update_busy)update_start();if(now-last_poll>5000u)last_ping=now;last_poll=now;if(now-last_ping>=240000u)break;FD_SET readset;readset.count=1;readset.sockets[0]=server;TIMEVAL wait={1,0};int ready=select(0,&readset,0,0,&wait);if(ready>0){SOCKET client=accept(server,0,0);if(client!=INVALID_SOCKET){if(__atomic_add_fetch(&workers,1,__ATOMIC_SEQ_CST)>8){__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}else{HANDLE thread=CreateThread(0,0,serve,(void*)client,0,0);if(thread)CloseHandle(thread);else{__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}}}}}
  __atomic_store_n(&update_closing,1,__ATOMIC_SEQ_CST);closesocket(server);while(workers)Sleep(100);WSACleanup();ExitProcess(0);

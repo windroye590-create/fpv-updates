@@ -57,7 +57,9 @@ jobs:
       - name: Test deployment rollback, concurrency and publication safeguards
         run: python3 -m unittest discover -s release-tools/tests -p 'test_*.py'
       - name: Run application regressions
-        run: npm --prefix source test
+        run: |
+          npm --prefix source test
+          python3 source/tests/native_identity.py
       - name: Build and verify Windows EXE
         env:
           COMMISSION_ALLOW_UNCONFIGURED_TEST: '1'
@@ -66,6 +68,11 @@ jobs:
           python3 build_windows.py
           python3 tests/validate_pe.py
           python3 tests/packed_image.py build/FPV-Komisiia-PC.exe --root . --check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-identity-candidate
+          path: source/build/FPV-Komisiia-PC.exe
+          if-no-files-found: error
       - name: Verify result layout and startup from EXE
         working-directory: source
         run: |
@@ -86,4 +93,41 @@ jobs:
             source/verification/*.json
             source/verification/results-actions-layout.png
             ${{ runner.temp }}/setup-check.json
+          if-no-files-found: warn
+  windows-identity:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow==12.3.0
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: windows-identity-candidate
+          path: candidate
+      - name: Retrieve pinned previously shipped executables
+        shell: pwsh
+        run: |
+          $originalUrl = 'https://raw.githubusercontent.com/windroye590-create/litakova-updates/499632333767e1d4fef04813e8abb7746439116c/channel/Litakova-Komisiia-PC.exe'
+          $previousUrl = 'https://raw.githubusercontent.com/windroye590-create/fpv-updates/946c6d3c328c5c11ef06060044db81e0ed237939/channel/FPV-Komisiia-PC.exe'
+          Invoke-WebRequest $originalUrl -OutFile candidate/Litakova-Komisiia-PC.exe -MaximumRetryCount 3 -RetryIntervalSec 3
+          Invoke-WebRequest $previousUrl -OutFile candidate/FPV-previous.exe -MaximumRetryCount 3 -RetryIntervalSec 3
+          if ((Get-FileHash candidate/Litakova-Komisiia-PC.exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne '82938f3d0c44bc0d7887285808b8afba1ad1e3390712d66501a97a45bbd06759') { throw 'Unexpected Litakova executable' }
+          if ((Get-FileHash candidate/FPV-previous.exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne '2dfa4dbb1585edbd25df79bc59e5de7ef96947716b82424aded1023098d26691') { throw 'Unexpected previous FPV executable' }
+      - name: Verify encrypted storage in the candidate Windows host
+        run: python source/tests/windows-private-storage.py candidate/FPV-Komisiia-PC.exe windows-private-storage.json
+      - name: Verify migration, simultaneous launch, taskbar identity and window icons
+        run: python source/tests/windows-edition-identity.py candidate/FPV-Komisiia-PC.exe candidate/FPV-previous.exe candidate/Litakova-Komisiia-PC.exe windows-identity
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: windows-edition-identity
+          path: |
+            windows-identity/*
+            windows-private-storage.json
           if-no-files-found: warn
