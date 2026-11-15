@@ -97,6 +97,7 @@ static void relay(SOCKET s,char*body,DWORD length){
 }
 #include "updater.h"
 #include "storage.h"
+#include "browser_identity.h"
 
 static DWORD serve(void*argument){
  SOCKET s=(SOCKET)argument;DWORD timeout=10000;setsockopt(s,0xffff,0x1006,(char*)&timeout,4);setsockopt(s,0xffff,0x1005,(char*)&timeout,4);
@@ -231,7 +232,8 @@ void mainCRTStartup(void){
   * in this edition's browser profile instead of reusing the obsolete page. */
  if(migrate)EnumWindows(close_migrated_window,0);
  if((!resumed||migrate)&&!launch_browser(url)){MessageBoxW(0,L"Для інтерфейсу потрібен Microsoft Edge або Google Chrome.",TITLE,16);ExitProcess(1);}
+ browser_identity_start();
  last_ping=GetTickCount64();QWORD last_poll=last_ping;
  for(;;){if(__atomic_load_n(&update_restart_requested,__ATOMIC_SEQ_CST))break;QWORD now=GetTickCount64();if(now-__atomic_load_n(&update_checked_at,__ATOMIC_SEQ_CST)>21600000u&&!update_busy)update_start();if(now-last_poll>5000u)last_ping=now;last_poll=now;if(now-last_ping>=240000u)break;FD_SET readset;readset.count=1;readset.sockets[0]=server;TIMEVAL wait={1,0};int ready=select(0,&readset,0,0,&wait);if(ready>0){SOCKET client=accept(server,0,0);if(client!=INVALID_SOCKET){if(__atomic_add_fetch(&workers,1,__ATOMIC_SEQ_CST)>8){__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}else{HANDLE thread=CreateThread(0,0,serve,(void*)client,0,0);if(thread)CloseHandle(thread);else{__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}}}}}
- __atomic_store_n(&update_closing,1,__ATOMIC_SEQ_CST);closesocket(server);while(workers)Sleep(100);WSACleanup();ExitProcess(0);
+ __atomic_store_n(&update_closing,1,__ATOMIC_SEQ_CST);closesocket(server);browser_identity_stop();while(workers)Sleep(100);WSACleanup();ExitProcess(0);
 }

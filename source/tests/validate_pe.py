@@ -40,7 +40,9 @@ while any(b[p:p+20]):
         items.append(cstring(address+2));assert struct.unpack_from('<Q',b,ip)[0]==address
         lp+=8;ip+=8
     imports[dll]=items;p+=20
-assert set(imports)=={'KERNEL32.dll','USER32.dll','SHELL32.dll','WINHTTP.dll','WS2_32.dll','CRYPT32.dll','BCRYPT.dll','ADVAPI32.dll'}
+assert set(imports)=={'KERNEL32.dll','USER32.dll','SHELL32.dll','WINHTTP.dll','WS2_32.dll','CRYPT32.dll','BCRYPT.dll','ADVAPI32.dll','OLE32.dll'}
+assert all(f in imports['USER32.dll'] for f in ['LoadImageW','GetPropW','SetPropW','EnumWindows','SendMessageTimeoutW'])
+assert 'SHGetPropertyStoreForWindow' in imports['SHELL32.dll']
 assert all(f in imports['SHELL32.dll'] for f in ['SHGetFileInfoW','SHUpdateImageW','SHChangeNotify'])
 for dll,functions in {'WINHTTP.dll':['WinHttpSendRequest','WinHttpReceiveResponse'],'CRYPT32.dll':['CryptProtectData','CryptUnprotectData'],'KERNEL32.dll':['GetTickCount64','MoveFileExW','CopyFileW','OpenProcess','QueryFullProcessImageNameW','WaitForSingleObject'],'BCRYPT.dll':['BCryptGenRandom'],'ADVAPI32.dll':['CryptAcquireContextW','CryptCreateHash','CryptImportKey','CryptVerifySignatureW'],'WINHTTP.dll':['WinHttpSendRequest','WinHttpReceiveResponse','WinHttpSetOption']}.items():
     assert all(f in imports[dll] for f in functions)

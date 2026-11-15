@@ -71,8 +71,8 @@ def message(hwnd, code, word=0):
     result = c.c_size_t()
     return result.value if not u.SendMessageTimeoutW(hwnd, code, word, 0, 2, 1000, c.byref(result)) else result.value
 
-def icon_hash(hwnd):
-    handle = next((h for h in [message(hwnd, 0x007f, 2), message(hwnd, 0x007f, 0), message(hwnd, 0x007f, 1), u.GetClassLongPtrW(hwnd, -34)] if h), 0)
+def icon_hash(hwnd, handle=None):
+    handle = handle or next((h for h in [message(hwnd, 0x007f, 2), message(hwnd, 0x007f, 0), message(hwnd, 0x007f, 1), u.GetClassLongPtrW(hwnd, -34)] if h), 0)
     if not handle: return None
     info = IconInfo()
     if not u.GetIconInfo(handle, c.byref(info)): return None
@@ -98,7 +98,7 @@ class VariantData(c.Union):
 class PropVariant(c.Structure):
     _fields_ = [('kind', w.WORD), ('reserved', w.WORD*3), ('data', VariantData)]
 
-def app_id(hwnd):
+def app_id(hwnd, property_id=5):
     iid = (c.c_ubyte*16).from_buffer_copy(uuid.UUID('886d8eeb-8cf2-4446-8d02-cdba1dbdcf99').bytes_le)
     store = c.c_void_p()
     shell.SHGetPropertyStoreForWindow.argtypes = [w.HWND, c.c_void_p, c.POINTER(c.c_void_p)]
@@ -106,7 +106,7 @@ def app_id(hwnd):
     methods = c.cast(store, c.POINTER(c.POINTER(c.c_void_p))).contents
     get = c.WINFUNCTYPE(w.LONG, c.c_void_p, c.POINTER(PropertyKey), c.POINTER(PropVariant))(methods[5])
     release = c.WINFUNCTYPE(w.ULONG, c.c_void_p)(methods[2])
-    key = PropertyKey((c.c_ubyte*16).from_buffer_copy(uuid.UUID('9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3').bytes_le), 5)
+    key = PropertyKey((c.c_ubyte*16).from_buffer_copy(uuid.UUID('9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3').bytes_le), property_id)
     value = PropVariant()
     try:
         assert get(store, c.byref(key), c.byref(value)) == 0
@@ -178,9 +178,23 @@ with tempfile.TemporaryDirectory(prefix='fpv-windows-identity-', ignore_cleanup_
             return (left, right) if left and right and left != right else None
         fpv_icon, original_icon = wait_for(icons, 'Both native browser windows still have the same icon', 60)
         passed('The real Windows browser windows display different icon bitmaps')
+        kernel.LoadLibraryExW.argtypes = [w.LPCWSTR, w.HANDLE, w.DWORD]; kernel.LoadLibraryExW.restype = w.HMODULE
+        kernel.FreeLibrary.argtypes = [w.HMODULE]
+        u.LoadImageW.argtypes = [w.HINSTANCE, c.c_void_p, w.UINT, c.c_int, c.c_int, w.UINT]; u.LoadImageW.restype = w.HANDLE
+        u.DestroyIcon.argtypes = [w.HICON]
+        module = kernel.LoadLibraryExW(str(fpv), None, 2)
+        assert module
+        expected_icon = u.LoadImageW(module, 1, 1, 32, 32, 0)
+        assert expected_icon
+        try: assert fpv_icon == icon_hash(None, expected_icon), 'The window does not show the FPV executable logo'
+        finally: u.DestroyIcon(expected_icon); kernel.FreeLibrary(module)
+        passed('The FPV window icon matches the actual drone icon embedded in its EXE')
         ids = {'fpv': app_id(fpv_window), 'litakova': app_id(litakova_window)}
-        assert all(ids.values()) and ids['fpv'] != ids['litakova'], ids
+        assert ids['fpv'] == 'FPVKomisiiaPC' and ids['fpv'] != ids['litakova'], ids
         passed('Windows gives the apps separate taskbar AppUserModelIDs')
+        assert app_id(fpv_window, 2).casefold() == ('"'+str(fpv)+'"').casefold()
+        assert app_id(fpv_window, 3).casefold() == (str(fpv)+',0').casefold()
+        passed('Taskbar pinning relaunches the FPV EXE with its own icon instead of an expiring browser URL')
         from PIL import ImageGrab
         ImageGrab.grab().save(out/'two-commissions.png')
         result = {'status': 'passed', 'passed': len(checks), 'checks': checks,
@@ -189,6 +203,10 @@ with tempfile.TemporaryDirectory(prefix='fpv-windows-identity-', ignore_cleanup_
                   'appUserModelIds': ids, 'accountRegistrationOrLearningWrites': False,
                   'fpvExeSHA256': hashlib.sha256(fpv.read_bytes()).hexdigest()}
         (out/'windows-edition-identity.json').write_text(json.dumps(result, indent=2)+'\n')
+    except Exception:
+        from PIL import ImageGrab
+        ImageGrab.grab().save(out/'failed-window-state.png')
+        raise
     finally:
         for title in ['FPV Комісія | ПК', 'Літакова Комісія | ПК']:
             for hwnd in windows(title): message(hwnd, 0x0010)
