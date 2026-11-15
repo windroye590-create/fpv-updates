@@ -8,10 +8,11 @@
   "deploymentVersion": 1,
   "ownerAuthorizationVerifiedAt": "2026-11-09T19:49:17Z",
   "release": {
-    "version": "1.0.0",
-    "code": 1,
-    "url": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.0",
-    "exeSha256": "2dfa4dbb1585edbd25df79bc59e5de7ef96947716b82424aded1023098d26691",
-    "verification": "release-staging/v1.0.0/published-verification.json"
-  }
+    "version": "1.0.1",
+    "code": 2,
+    "url": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.1",
+    "exeSha256": "4649a9c8cc14acf1062a7256b8ece813d291c2bd4ddf2a13eaa9dd86d8dcd194",
+    "verification": "release-staging/v1.0.1/published-verification.json"
+  },
+  "lastVerifiedAt": "2026-11-15T09:12:09Z"
 }

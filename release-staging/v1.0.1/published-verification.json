@@ -1,0 +1,55 @@
+{
+  "status": "passed",
+  "version": "1.0.1",
+  "code": 2,
+  "releaseId": 445931290,
+  "releaseUrl": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.1",
+  "stable": true,
+  "allFourAssetsMatchCommittedChannel": true,
+  "fpvSignatureVerified": true,
+  "bothCommissionsRejectEachOthersCatalogs": true,
+  "size": 8675715,
+  "sha256": "4649a9c8cc14acf1062a7256b8ece813d291c2bd4ddf2a13eaa9dd86d8dcd194",
+  "verifiedAt": "2026-11-15T09:12:09Z",
+  "sourceCommit": "2d4b363e073fdd0a576ebccd7c8db4c2ecaefef8",
+  "sourceArchiveSHA256": "5a56f1683b870adf3e3aad480b03885601d219cc035503f58b3ef6f574ba6743",
+  "server": {
+    "status": "passed",
+    "api": 26,
+    "service": "FPV Комісія",
+    "serverBuild": "pc-api26-acac48e64011cc1f",
+    "spreadsheetLayoutReady": true
+  },
+  "checks": {
+    "desktopUI": 51,
+    "responsiveUI": 308,
+    "packedStartup": 10,
+    "signedUpdateProtocol": 29,
+    "nativeLauncher": 12,
+    "publishedWindowsStorage": 16,
+    "windowsIdentityAndMigration": 8
+  },
+  "windowsIdentityCandidate": {
+    "commit": "d08593fdd209bd1d3965ddc7493ce69893f55550",
+    "versionBeforeReleasePreparation": "1.0.0",
+    "exeSHA256": "59444a3d4ffc41db89b3529837e326b3df1c29f8e9544ecf0d7ce8a2ac8f2877",
+    "checks": [
+      "The real 1.0.0 browser migrates to the isolated origin and its obsolete window closes",
+      "The running browser creates the FPV-only profile",
+      "Both actual apps run simultaneously on their separate local listeners",
+      "Both listeners reject the other commission secret",
+      "The real Windows browser windows display different icon bitmaps",
+      "The FPV window icon matches the actual drone icon embedded in its EXE",
+      "Windows gives the apps separate taskbar AppUserModelIDs",
+      "Taskbar pinning relaunches the FPV EXE with its own icon instead of an expiring browser URL"
+    ],
+    "appUserModelIds": {
+      "fpv": "FPVKomisiiaPC",
+      "litakova": "MSEdge.127.0.0.1_/.UserData.Default"
+    },
+    "url": "https://github.com/windroye590-create/fpv-updates/actions/runs/43696890905"
+  },
+  "publishedWindowsAudit": "https://github.com/windroye590-create/fpv-updates/actions/runs/43697693628",
+  "releaseWorkflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/43697296280",
+  "releaseWorkflowConclusion": "success"
+}
