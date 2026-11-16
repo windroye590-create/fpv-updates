@@ -54,6 +54,24 @@ export function statementLayout(statement,measure){
  text(28,824,'Сформовано у застосунку «FPV Комісія»',7,false,true);text(544,824,'1 / 1',7,true,true);
  return {texts,lines,tableTop:top,tableBottom:y,bodySize:font};
 }
+let pdfPromise,pdfAttempts=0;
+function pdfLibrary(){
+ if(typeof globalThis.jspdf?.jsPDF==='function')return Promise.resolve(globalThis.jspdf.jsPDF);
+ if(!pdfPromise)pdfPromise=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');let settled=false;
+  const finish=()=>{
+   if(settled)return;settled=true;clearTimeout(timer);script.onload=null;script.onerror=null;script.remove();
+   if(typeof globalThis.jspdf?.jsPDF==='function')resolve(globalThis.jspdf.jsPDF);
+   else reject(Error('Не вдалося завантажити модуль PDF. Повторіть експорт.'));
+  };
+  const timer=setTimeout(finish,15000);
+  // A timed-out script may still be in flight; retries need a distinct URL.
+  const attempt=pdfAttempts++;
+  script.src='/vendor/jspdf.umd.min.js'+(attempt?'?retry='+attempt:'');script.async=true;script.onload=finish;script.onerror=finish;
+  try{document.head.append(script);}catch{finish();}
+ }).catch(error=>{pdfPromise=null;throw error;});
+ return pdfPromise;
+}
 let fontPromise;
 async function font(){
  if(!fontPromise)fontPromise=fetch('/statement-font.ttf').then(r=>{if(!r.ok)throw Error('Не вдалося відкрити шрифт PDF. Перезапустіть програму.');return r.arrayBuffer();}).then(b=>{
@@ -61,8 +79,8 @@ async function font(){
  }).catch(error=>{fontPromise=null;throw error;});return fontPromise;
 }
 export async function statementPdf(statement){
- if(!globalThis.jspdf?.jsPDF)throw Error('Модуль PDF недоступний. Перезапустіть програму.');
- const pdf=new globalThis.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'a4',compress:true});
+ const jsPDF=await pdfLibrary();
+ const pdf=new jsPDF({orientation:'portrait',unit:'pt',format:'a4',compress:true});
  pdf.addFileToVFS('statement-font.ttf',await font());pdf.addFont('statement-font.ttf','Statement','normal');pdf.setFont('Statement');
  pdf.setProperties({title:'Відомість групи',subject:'Результати тестування',creator:'FPV Комісія'});
  const layout=statementLayout(statement,(value,size)=>{pdf.setFontSize(size);return pdf.getTextWidth(value);});

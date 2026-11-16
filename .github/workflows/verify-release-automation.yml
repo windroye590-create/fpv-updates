@@ -78,6 +78,7 @@ jobs:
         run: |
           npm install --ignore-scripts --no-audit --no-fund --no-package-lock
           npx playwright install --with-deps chromium
+          node tests/pdf-export-ui.mjs
           node tests/private-storage-ui.mjs
           node tests/excel-report-ui.mjs
           node tests/cadet-card-ui.mjs
