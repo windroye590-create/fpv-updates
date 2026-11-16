@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Real app modules and Chromium. All transport and identities are synthetic;
 // when PACKED_EXE is supplied every displayed asset comes from that exact PE.
 import assert from 'node:assert/strict';
@@ -35,6 +36,8 @@ function rpc(p){
 const csp="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const mime={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf','.wasm':'application/wasm'};
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://local').pathname;requests.push({route,method:req.method});
   res.setHeader('Content-Security-Policy',csp);res.setHeader('Cache-Control','no-store');

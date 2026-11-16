@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // This suite tests only our own local application, with the real Code.gs logic
 // in an isolated in-memory model. It never logs into or mutates the live service.
 import assert from 'node:assert/strict';
@@ -12,6 +13,8 @@ const start=performance.now(),rpcCalls=[],failures=[],checks=[];
 const group=api('POST','/api/instructor/groups',instructorToken,{name:'ПК — перевірка інтерфейсу'}).group;
 const mime={'.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.css':'text/css','.png':'image/png','.ttf':'font/ttf'};
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const url=new URL(req.url,'http://localhost');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");

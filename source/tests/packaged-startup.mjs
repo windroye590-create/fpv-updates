@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -41,6 +42,8 @@ const states=new Map(),journals=new Map(),requests=[],checks=[];
 let active=next,blockModule=false,offline=false,slow=false,failRead=false,failJournal=false,slowJournal=false,waiting=[];
 const csp="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const u=new URL(req.url,'http://local'),key=req.headers['x-lk-key']||u.searchParams.get('key');
   requests.push({method:req.method,path:u.pathname,key});res.setHeader('Content-Security-Policy',csp);res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');

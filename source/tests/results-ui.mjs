@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Actual desktop UI, synthetic accounts only. No requests reach a live service.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,6 +19,8 @@ const user={id:'teacher',username:'WindRoy',fullName:'Розробник',role:'
 let state={version:1,theme:'light',session:{token:'local-results-fixture',user},groups,accounts:{teacher:{tests,results,cadets,fullTests:{},pending:[],reviews:{},resultTotal:results.length}}},journal={},truncated=false,deletionEnabled=false,resultRevision=1;
 const calls=[],errors=[],checks=[];
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://local').pathname;res.setHeader('Cache-Control','no-store');
   if(route==='/state'||route==='/journal'){

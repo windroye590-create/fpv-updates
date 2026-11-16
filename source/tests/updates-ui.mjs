@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Browser integration against this application's own local native-host double.
 // It changes the served version only after simulated replacement; no live data.
 import assert from 'node:assert/strict';
@@ -18,6 +19,8 @@ let state={},journal={},events=[],currentCode=installed,stage=2,diskFailure=fals
 const failures=[],checks=[],web=new URL('../web/',import.meta.url).pathname;
 const mime={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf','.wasm':'application/wasm'};
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://local').pathname;
   res.setHeader('Cache-Control','no-store');

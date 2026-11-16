@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +12,8 @@ const user=api('GET','/api/workspace',instructorToken).user;
 let state={version:1,session:{token:instructorToken,user},accounts:{},groups:[]},journal={};
 const errors=[],calls=[],checks=[];let largestRequest=0;
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://local').pathname;
   const read=async()=>{const chunks=[];for await(const c of req)chunks.push(c);return Buffer.concat(chunks);};

@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -18,6 +19,8 @@ const a={tests,results,cadets,materials,fullTests:{},pending:[],reviews:{},mater
 let state={version:1,session:{token:'perf',user},groups,accounts:{i:a}},calls=[],active=0,maxActive=0,revoked=false,jitter=false,corrupt=false,finished=[];
 const delay=100;
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const path=new URL(req.url,'http://localhost').pathname;
   if(['/state','/journal','/clock'].includes(path)){

@@ -20,8 +20,8 @@ const PUBLIC_SYNC_RETRY = 'LK_PUBLIC_SYNC_RETRY_V1';
 const PUBLIC_SYNC_DELAY_MS = 30000;
 const REVIEW_LEASE_MS = 120000;
 const REVIEW_LEASE_PREFIX = 'LK_REVIEW_SESSION_V1_';
-const LATEST_APP_VERSION_CODE = 2;
-const LATEST_APP_VERSION_NAME = '1.0.1';
+const LATEST_APP_VERSION_CODE = 3;
+const LATEST_APP_VERSION_NAME = '1.0.2';
 const APP_DOWNLOAD_URL_PROPERTY = 'PC_DOWNLOAD_URL';
 const ROLE_INSTRUCTOR = 'instructor';
 const ROLE_CADET = 'cadet';
@@ -703,6 +703,9 @@ function routeApi_(request) {
 
   var deleteUserMatch = path.match(/^\/api\/instructor\/users\/([^/]+)$/);
   if (method === 'DELETE' && deleteUserMatch) return deleteCadet_(decodePart_(deleteUserMatch[1]), user, body);
+
+  var deletionReviewMatch = path.match(/^\/api\/instructor\/users\/([^/]+)\/deletion-review$/);
+  if (method === 'GET' && deletionReviewMatch) return deleteCadet_(decodePart_(deletionReviewMatch[1]), user, {}, true);
 
   fail_('Запит не підтримується цією версією сервера.', 'NOT_FOUND');
 }
@@ -2716,18 +2719,37 @@ function requireCadetNotDeleting_(id) {
 }
 
 /** Delete by stable IDs and preflight historical rows before any erasure. */
-function deleteCadet_(id, actor, body) {
+function deleteCadet_(id, actor, body, preview) {
   requireRole_(actor, ROLE_INSTRUCTOR);
   id = String(id);
-  if (String(body.confirmUserId || '') !== id) {
+  if (!preview && String(body.confirmUserId || '') !== id) {
     fail_('Підтвердіть повне видалення вибраного курсанта.', 'CONFIRMATION_REQUIRED');
   }
   var user = findUserById_(id), properties = PropertiesService.getScriptProperties();
   var pendingKey = 'DELETING_CADET_' + id;
   if (user && user.role !== ROLE_CADET) fail_('Видаляти можна лише курсантів.', 'FORBIDDEN');
   if (!user) {
+    if (preview) return {cadetDeletionReviewProtocol:1,userId:id,alreadyDeleted:true,rows:[]};
     if (properties.getProperty(pendingKey)) properties.deleteProperty(pendingKey);
     return {deleted: true, userId: id, alreadyDeleted: true};
+  }
+
+  var reviewRows=[],reviewBindings=[],checkedBindings=Object.create(null),decisions=Object.create(null);
+  var accountDigest=sha256Hex_(JSON.stringify([id,user.username,user.fullName,user.groupName]));
+  if (!preview && body.legacyRows !== undefined) {
+    if (!Array.isArray(body.legacyRows) || body.legacyRows.length>5000) fail_('Некоректне підтвердження старих рядків.','BAD_REQUEST');
+    body.legacyRows.forEach(function(choice){
+      if (!choice || typeof choice.remove!=='boolean') fail_('Оберіть дію для кожного старого рядка.','BAD_REQUEST');
+      var signed=readSignedDocument_(choice.token,'INVALID_PREVIEW');
+      if (signed.kind!=='cadet-deletion-row' || signed.userId!==id || signed.actorId!==String(actor.id)
+          || signed.accountDigest!==accountDigest || !Number.isFinite(signed.expiresAt) || signed.expiresAt<Date.now()) {
+        fail_('Перелік старих рядків застарів. Відкрийте видалення ще раз.','PREVIEW_EXPIRED');
+      }
+      var key=JSON.stringify([signed.source,signed.bookId,signed.sheetId,signed.rowNumber,signed.digest]);
+      if (Object.prototype.hasOwnProperty.call(decisions,key)) fail_('Повторне підтвердження одного рядка.','BAD_REQUEST');
+      decisions[key]=choice.remove;
+      reviewBindings.push({key:key,value:signed});
+    });
   }
 
   var resultRows = dataRows_('results'), legacyRows = dataRows_('legacyResults'), deletedRows = dataRows_('deletedResults');
@@ -2788,14 +2810,26 @@ function deleteCadet_(id, actor, body) {
     }
     var titleColumn = headers.indexOf('Тест');
     var canonicalRows=publicRowsFromSheet_(sheet,headers.indexOf('Група')<0);
-    plan(sheet, sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues(), function (row,index) {
+    var physicalRows=sheet.getRange(2,1,sheet.getLastRow()-1,width).getValues();
+    var bookId=String(legacy?SPREADSHEET_ID:properties.getProperty(PUBLIC_RESULTS_PROPERTY)||'');
+    reviewBindings.forEach(function(binding){
+      var signed=binding.value;
+      if (signed.source!==(legacy?'legacy':'public')) return;
+      var row=physicalRows[signed.rowNumber-2];
+      if (signed.bookId!==bookId || signed.sheetId!==String(sheet.getSheetId()) || !Number.isInteger(signed.rowNumber) || !row
+          || signed.digest!==sha256Hex_(JSON.stringify([headers,row]))) {
+        fail_('Старі рядки змінилися. Закрийте підтвердження та відкрийте видалення ще раз.','REVISION_CONFLICT');
+      }
+      checkedBindings[binding.key]=true;
+    });
+    plan(sheet, physicalRows, function (row,index) {
       var owner = String(row[userColumn] || ''), resultId = String(row[resultColumn] || '');
       var resultOwner = resultOwners[resultId] || '';
       if (owner && resultOwner && owner !== resultOwner && (owner === id || resultOwner === id)) {
         fail_('ID роботи й курсанта в таблиці не збігаються. Виправте цей рядок перед видаленням.', 'PUBLIC_RESULTS_SCHEMA');
       }
       if (owner || resultOwner) return owner === id || resultOwner === id;
-      var name = normalize_(row[0]);
+      var name = normalize_(canonicalRows[index][0]);
       if (!names[name] || !names[name][id]) return false;
       var visible=canonicalRows[index].slice(0,6);
       var owners = !resultId && visible.slice(1).every(function(value){return value === '';})
@@ -2803,7 +2837,22 @@ function deleteCadet_(id, actor, body) {
         : (candidates[name] || []).filter(function(result){return publicRowMatchesStoredResult_(visible,result);})
           .map(function(result){return String(result.userId);});
       if (resultId || !owners.length || (owners.indexOf(id) >= 0 && owners.some(function(value){return value !== id;}))) {
-        fail_('Не вдалося однозначно визначити курсанта в старих рядках таблиці. Уточніть ID цих рядків перед видаленням.', 'PUBLIC_RESULTS_ID_REQUIRED');
+        var source=legacy?'legacy':'public',sheetId=String(sheet.getSheetId()),rowNumber=index+2;
+        var digest=sha256Hex_(JSON.stringify([headers,row]));
+        var key=JSON.stringify([source,bookId,sheetId,rowNumber,digest]);
+        if (preview) {
+          reviewRows.push({source:source,rowNumber:rowNumber,name:String(canonicalRows[index][0]||''),
+            testTitle:String(visible[5]||''),correct:visible[1],incorrect:visible[2],duration:visible[3],score:visible[4],
+            groupName:String(canonicalRows[index][12]||''),completedAt:canonicalRows[index][13]||'',
+            token:signedDocument_({kind:'cadet-deletion-row',userId:id,actorId:String(actor.id),accountDigest:accountDigest,
+              source:source,bookId:bookId,sheetId:sheetId,rowNumber:rowNumber,digest:digest,expiresAt:Date.now()+600000})});
+          return false;
+        }
+        if (!Object.prototype.hasOwnProperty.call(decisions,key)) {
+          if (Object.keys(decisions).length) fail_('Старі рядки змінилися. Закрийте підтвердження та відкрийте видалення ще раз.','REVISION_CONFLICT');
+          fail_('У старих рядках немає однозначного ID. У версії 1.0.2 або новішій відкрийте видалення ще раз і вкажіть належність цих рядків.','PUBLIC_RESULTS_ID_REQUIRED');
+        }
+        return decisions[key];
       }
       return owners.indexOf(id) >= 0;
     });
@@ -2811,6 +2860,8 @@ function deleteCadet_(id, actor, body) {
   var tables = intakePublicSheets_();
   planPublic(tables.public, false);
   planPublic(tables.legacyPublic, true);
+  if (reviewBindings.some(function(binding){return !checkedBindings[binding.key];})) fail_('Таблиця або старі рядки змінилися. Відкрийте видалення ще раз.','REVISION_CONFLICT');
+  if (preview) return {cadetDeletionReviewProtocol:1,userId:id,alreadyDeleted:false,rows:reviewRows};
   planPrivate('sync', function (row) {
     var type = String(row[1] || '');
     if (type.indexOf('result:') === 0) return Boolean(resultIds[type.slice(7)]);

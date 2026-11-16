@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Isolated real Chromium + unmodified app + unmodified Code.gs. No external requests.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,6 +24,8 @@ const journals=stores.map(()=>({})),counts=new Map(),errors=[],unexpected=[],met
 let active=0,phase='initial',offline=false;
 const started=performance.now();
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  active++;metrics.peakActive=Math.max(active,metrics.peakActive);
  try{
   const index=Number(/stressClient=(\d+)/.exec(req.headers.cookie||'')?.[1]??-1);

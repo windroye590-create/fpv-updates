@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,8 @@ context.sheet_('materialProgress').appendRow(['card-ui-pdf',1,String(a.user.id),
 let state={version:1,theme:'light',session:{token:instructorToken,user},groups:[],accounts:{}},journal={},dropNote=false,offline=false;
 const errors=[],checks=[],calls=[];
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://localhost').pathname;res.setHeader('Cache-Control','no-store');
   if(['/state','/journal'].includes(route)){

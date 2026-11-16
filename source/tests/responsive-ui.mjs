@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Exercise the real UI at desktop, narrow, and short window sizes. The local
 // service supplies synthetic records only; no live accounts are used or changed.
 import assert from 'node:assert/strict';
@@ -22,6 +23,8 @@ const materials=Array.from({length:54},(_,i)=>({id:'m'+i,title,description:'Оп
 const checks=[],failures=[],pageErrors=[];let state={},journal={},offline=false,role='instructor';
 function seed(next){role=next;state={version:1,theme:'light',groups,session:next==='auth'?null:{token:'responsive-fixture',user:{id:next==='cadet'?'c':'i',username:'WindRoy',fullName:'Шевченко-Петренко Олександр Володимирович '+word,role:next,title:'Інструктор',groupName:groups[0].name}},accounts:{}};if(next!=='auth')state.accounts[next==='cadet'?'c':'i']={tests,results,cadets,materials,materialProgress:{},materialSaved:{},fullTests:{t0:fullTest},pending:[],reviews:{r0:[{questionId:'q0',questionText:questions[0].text,selectedAnswerId:'no0',correctAnswerId:'yes0',selectedAnswerText:questions[0].answers[1].text,correctAnswerText:questions[0].answers[0].text,explanation:word}]},run:null,draft:null,capabilities:{multipleChoice:true,writtenTests:true},updatedAt:Date.now()};journal={};offline=false;}
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://local').pathname;res.setHeader('Cache-Control','no-store');
   if(route==='/state'||route==='/journal'){
@@ -33,6 +36,7 @@ const server=http.createServer(async(req,res)=>{
    let raw='';for await(const c of req)raw+=c;const p=JSON.parse(raw);let b={ok:true};
    if(offline){res.end('{"ok":false,"code":"NETWORK","error":"Тестова мережа недоступна"}');return;}
    if(p.path==='/api/groups')b.groups=groups;
+   else if(p.method==='GET'&&/^\/api\/instructor\/users\/[^/]+\/deletion-review$/.test(p.path))Object.assign(b,{cadetDeletionReviewProtocol:1,userId:decodeURIComponent(p.path.split('/')[4]),rows:[{token:'synthetic-layout-review',source:'public',rowNumber:2,name:cadets[0].fullName,testTitle:title,groupName:groups[0].name,correct:45,incorrect:15,duration:'28 хв 52 с',score:75}]});
    else if(p.path==='/api/workspace')Object.assign(b,{workspaceProtocol:1,user:state.session.user,revisions:{groups:'g1',tests:'t1',cadets:'c1',results:'r1'},changes:{groups,tests,results,...(role==='instructor'?{cadets}:{})},resultTotal:results.length,snapshotStable:true,capabilities:{multipleChoice:true,writtenTests:true,materials:true,groupArchive:true,bulkAssignment:true,filteredAnalytics:true}});
    else if(p.path==='/api/account-state')Object.assign(b,{accountSyncProtocol:1,userId:state.session.user.id,cursor:'responsive-fixture',documents:[],stable:true});
    else if(p.path==='/api/account-state/document')Object.assign(b,{accountSyncProtocol:1,userId:state.session.user.id,document:{key:p.body.key,revision:(p.body.expectedRevision||0)+1,value:p.body.value??null}});

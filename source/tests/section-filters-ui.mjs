@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Actual application UI with isolated local data; no production requests.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,6 +17,8 @@ const user={id:'teacher',username:'teacher',fullName:'Інструктор пе�
 let state={version:1,theme:'light',session:{token:'section-filter-fixture',user},groups,accounts:{teacher:{tests,cadets,results,materials,fullTests:{},pending:[],reviews:{},resultTotal:results.length,sharedFilters:{groupId:'g1',testId:'t1'}}}},journal={};
 const calls=[],errors=[],checks=[];
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const route=new URL(req.url,'http://localhost').pathname;res.setHeader('Cache-Control','no-store');
   if(['/state','/journal'].includes(route)){

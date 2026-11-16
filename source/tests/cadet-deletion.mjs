@@ -125,7 +125,7 @@ await check('The actual confirmation handler cleans the selected cadet and work 
  const sandbox={a:account,act:'delete-cadet',tid:String(a.user.id),id:C.id,e:C.esc,S:{session:{user,token:instructorToken},accounts:{}},
   instructor:()=>true,reviewQueue:[target,kept],examRecoveryQueue:[{userId:a.user.id}],grading:null,
   persist:async()=>{},render:()=>{},toast:()=>{},refresh:async()=>{},
-  confirmAction:(_title,_text,action)=>action()};
+  confirmAction:(_title,_text,action)=>action(),dialog:(_title,_text,action)=>action({})};
  sandbox.rpc=(method,route,body,token)=>api(method,route,token,body);
  const state=vm.createContext(sandbox);
  const helpers=app.slice(app.indexOf('function forgetResultDetails('),app.indexOf('function confirmResultDeletion('));
@@ -140,6 +140,84 @@ await check('The actual confirmation handler cleans the selected cadet and work 
  assert.equal(state.examRecoveryQueue.length,0);
  assert.equal(context.findUserById_(a.user.id),null);
  assert.ok(!publicRows().some(row=>matchesId(row,target)));
+});
+
+const preview=person=>api('GET',path(person)+'/deletion-review',instructorToken);
+const reviewedRemove=(person,rows)=>api('DELETE',path(person),instructorToken,{confirmUserId:String(person.user.id),legacyRows:rows});
+const unknownRow=(person,title)=>[person.user.fullName,3,1,'15 хв 0 с',75,title,'',''];
+
+await check('An unowned historical score is previewed before an explicit row choice removes it',()=>{
+ const a=cadet('review_old_score','Перегляд старого рядка');
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Старе проходження без ID'));
+ reject(()=>remove(a),'PUBLIC_RESULTS_ID_REQUIRED');
+ const review=preview(a);
+ assert.equal(review.cadetDeletionReviewProtocol,1);assert.equal(String(review.userId),String(a.user.id));
+ assert.equal(review.rows.length,1);assert.equal(review.rows[0].testTitle,'Старе проходження без ID');
+ assert.ok(context.findUserById_(a.user.id));assert.ok(publicRows().some(r=>r[5]===review.rows[0].testTitle));
+ const result=reviewedRemove(a,review.rows.map(row=>({token:row.token,remove:true})));
+ assert.equal(result.deleted,true);assert.equal(context.findUserById_(a.user.id),null);
+ assert.ok(!publicRows().some(r=>r[5]==='Старе проходження без ID'));
+});
+
+await check('A reviewed legacy row can remain for a namesake while only the selected account is removed',()=>{
+ const a=cadet('review_namesake_remove','Двоє тезок для перегляду'),b=cadet('review_namesake_keep',a.user.fullName);
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Залишити старий рядок іншої людини'));
+ const review=preview(a);assert.equal(review.rows.length,1);
+ reviewedRemove(a,[{token:review.rows[0].token,remove:false}]);
+ assert.equal(context.findUserById_(a.user.id),null);assert.ok(context.findUserById_(b.user.id));
+ assert.ok(publicRows().some(r=>r[5]==='Залишити старий рядок іншої людини'));
+ assert.ok(publicRows().some(r=>String(r[6])===String(b.user.id)));
+});
+
+await check('A changed row, moved row and tampered review token stop before any erasure',()=>{
+ const a=cadet('review_concurrency','Незмінність рядків перегляду');
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Рядок, який зміниться'));
+ let review=preview(a),choice={token:review.rows[0].token,remove:true};
+ const row=publicSheet.rows[review.rows[0].rowNumber-1],score=publicSheet.rows[0].indexOf('Підсумковий бал, %');
+ row[score]=0.55;
+ reject(()=>reviewedRemove(a,[choice]),'REVISION_CONFLICT');assert.ok(context.findUserById_(a.user.id));
+ review=preview(a);choice={token:review.rows[0].token,remove:true};
+ publicSheet.rows.splice(1,0,Array(publicSheet.maxColumns).fill(''));
+ reject(()=>reviewedRemove(a,[choice]),'REVISION_CONFLICT');
+ publicSheet.rows.splice(1,1);
+ reject(()=>reviewedRemove(a,[{token:choice.token+'x',remove:true}]),'INVALID_PREVIEW');
+ assert.ok(context.findUserById_(a.user.id));
+ review=preview(a);reviewedRemove(a,review.rows.map(row=>({token:row.token,remove:true})));
+});
+
+await check('Review authorization binds the cadet, instructor, account state and expiry',()=>{
+ const a=cadet('review_authorization','Захист підтвердження рядків'),b=cadet('review_other_user','Інший акаунт перегляду');
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Захищений старий рядок'));
+ reject(()=>api('GET',path(a)+'/deletion-review',''),'SESSION_EXPIRED');
+ reject(()=>api('GET',path(a)+'/deletion-review',a.token),'FORBIDDEN');
+ const review=preview(a),token=review.rows[0].token;
+ const signed=context.readSignedDocument_(token,'INVALID_PREVIEW');
+ for(const patch of [{userId:String(b.user.id)},{actorId:'another-instructor'},{expiresAt:Date.now()-1},{accountDigest:'changed'}]){
+  const altered=context.signedDocument_({...signed,...patch});
+  reject(()=>reviewedRemove(a,[{token:altered,remove:true}]),'PREVIEW_EXPIRED');
+ }
+ reject(()=>reviewedRemove(a,[{token,remove:true},{token,remove:false}]),'BAD_REQUEST');
+ assert.ok(context.findUserById_(a.user.id));
+ reviewedRemove(a,[{token,remove:true}]);
+});
+
+await check('Assigning an old row to another account after preview invalidates the prior choice',()=>{
+ const a=cadet('review_reassigned_target','Змінений власник старого рядка'),b=cadet('review_reassigned_keep',a.user.fullName);
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Перепризначена стара робота'));
+ const review=preview(a),row=publicSheet.rows[review.rows[0].rowNumber-1],owner=publicSheet.rows[0].indexOf('_ID курсанта');
+ row[owner]=String(b.user.id);
+ reject(()=>reviewedRemove(a,[{token:review.rows[0].token,remove:true}]),'REVISION_CONFLICT');
+ assert.ok(context.findUserById_(a.user.id));assert.ok(context.findUserById_(b.user.id));assert.equal(row[owner],String(b.user.id));
+ row[owner]='';reviewedRemove(a,preview(a).rows.map(item=>({token:item.token,remove:true})));
+});
+
+await check('Resolving the cadet unblocks deleting the now empty and unassigned group',()=>{
+ const ownGroup=api('POST','/api/instructor/groups',instructorToken,{name:'Домаха — тест видалення'}).group;
+ const a=api('POST','/api/register','',{username:'petro_group_fixture',fullName:'Петренко Тестовий Приклад',groupId:ownGroup.id,...credential('cadet-deletion-fixture-password')});
+ context.appendPublicRow_(publicSheet,unknownRow(a,'Давня робота Петренка без ID'));
+ reject(()=>api('DELETE','/api/instructor/groups/'+ownGroup.id,instructorToken),'GROUP_NOT_EMPTY');
+ const review=preview(a);reviewedRemove(a,review.rows.map(row=>({token:row.token,remove:true})));
+ assert.equal(api('DELETE','/api/instructor/groups/'+ownGroup.id,instructorToken).deleted,true);
 });
 
 fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});

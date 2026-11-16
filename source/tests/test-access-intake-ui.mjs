@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Four isolated PC profiles; synthetic accounts and the real application/server.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,7 +23,9 @@ let dropCleanupReply=false;const cleanupReplies=[];
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf','.mjs':'text/javascript','.wasm':'application/wasm'};
 function seed(key,actor){states.set(key,{version:1,theme:'light',session:{token:actor.token,user:actor.user},groups:[ga,gb],accounts:{[actor.user.id]:{tests:[],results:[],cadets:[],fullTests:{},pending:[],reviews:{}}}});journals.set(key,{});}
 seed('instructor',first);seed('resumer',second);seed('cadet-a',ca);seed('cadet-b',cb);
-const server=http.createServer(async(req,res)=>{try{
+const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+try{
  const url=new URL(req.url,'http://local'),key=req.headers['x-lk-key'];res.setHeader('Cache-Control','no-store');
  if(url.pathname==='/clock'){res.end(JSON.stringify({ok:true,uptime:100000+performance.now(),launchId:'intake-ui'}));return;}
  if(url.pathname.startsWith('/updates/')){res.end(JSON.stringify({ok:true,state:2,currentVersion:version.version,currentCode:version.versionCode,message:'Установлено актуальну версію.'}));return;}

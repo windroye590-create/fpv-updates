@@ -107,8 +107,11 @@ function alive(){return !replaced&&localStorage.getItem(leaseKey)===windowId;}
 async function local(path,body,headers={}){
  if(!alive())throw Error('Програму відкрито в іншому вікні.');
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),path==='/rpc'||path.startsWith('/legacy/')?90000:15000);
- try{const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-LK-Key':key,'Content-Type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});if(!r.ok)throw Error('Локальний модуль не відповідає. Закрийте вікно та запустіть EXE знову.');return await r.json();}catch(x){if(x.name==='AbortError'){const err=Error('Запит триває надто довго. Дані залишаються збереженими.');err.code='TIMEOUT';throw err;}throw x;}finally{clearTimeout(timeout);}
+ try{const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-LK-Key':key,'Content-Type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});if(!r.ok)throw Error('Локальний модуль не відповідає. Закрийте вікно та запустіть EXE знову.');return await r.json();}catch(x){if(x.name==='AbortError'){const err=Error('Запит триває надто довго. Дані залишаються збереженими.');err.code='TIMEOUT';throw err;}if(x.name==='TypeError'){throw Object.assign(Error('Втрачено зв’язок із локальним модулем. Запустіть EXE знову й повторіть дію.'),{code:'LOCAL_HOST_UNAVAILABLE'});}throw x;}finally{clearTimeout(timeout);}
 }
+const hostWindow=C.createHostWindow({local,key,windowId,alive,updating:()=>updateApplying,beacon:(path,body)=>navigator.sendBeacon(path,body)});
+hostWindow.open().catch(()=>{});
+setInterval(()=>{if(hostWindow.needsOpen&&alive()&&!updateApplying)hostWindow.open().catch(()=>{});},10000);
 const secureStorage=createSecureStorage({local,keepalive:(path,value,headers)=>{
  const raw=JSON.stringify(value);if(new TextEncoder().encode(raw).length>=60000)return false;
  fetch(path,{method:'POST',headers:{'X-LK-Key':key,'Content-Type':'application/json',...headers},body:raw,keepalive:true}).catch(()=>{});return true;
@@ -900,9 +903,17 @@ async function clickAction(button){
   if(!instructor())return;
   const session=S.session,cadetId=id(tid),u=a.cadets.find(cadet=>id(cadet.id)===cadetId);
   if(!u)throw Error('Курсанта не знайдено. Оновіть список.');
-  return confirmAction('Видалити курсанта повністю?',`<strong>${e(u.fullName)}</strong><br>Логін: ${e(u.username)}<br>Група: ${e(u.groupName)}<br><br>Акаунт, усі проходження й відповіді буде видалено із застосунка, а результати також зі спільної Google Таблиці. Цю дію неможливо скасувати.`,async()=>{
+  let review;
+  try{review=await rpc('GET','/api/instructor/users/'+encodeURIComponent(cadetId)+'/deletion-review',{},session.token);}
+  catch(x){if(x.code!=='NOT_FOUND')throw x;review={cadetDeletionReviewProtocol:1,userId:cadetId,rows:[]};}
+  if(S.session?.token!==session.token)return;
+  if(review.cadetDeletionReviewProtocol!==1||id(review.userId)!==cadetId||!Array.isArray(review.rows))throw Error('Сервер повернув некоректний перелік старих рядків. Оновіть дані.');
+  if(review.alreadyDeleted){await refresh(true);toast('Курсанта вже видалено. Дані оновлено.');return;}
+  const legacy=review.rows.map((row,index)=>`<fieldset class="panel"><legend>${e(row.source==='legacy'?'Стара таблиця':'Спільна таблиця')} · рядок ${e(row.rowNumber)}</legend><p><strong>${e(row.name)}</strong><br>Тест: ${e(row.testTitle||'Не вказано')}<br>Група: ${e(row.groupName||'Не вказано')}<br>Правильних: ${e(row.correct===''?'—':row.correct)} · Неправильних: ${e(row.incorrect===''?'—':row.incorrect)} · Оцінка: ${e(row.score===''?'—':row.score)}<br>Час: ${e(row.duration||'Не вказано')}${row.completedAt?'<br>Завершено: '+e(date(row.completedAt)):''}</p><label class="field">Кому належить цей запис?<select name="legacy-row-${index}" required><option value="">Оберіть дію</option><option value="remove">Цьому курсанту — видалити разом з акаунтом</option><option value="keep">Іншому курсанту або невідомо — залишити</option></select></label></fieldset>`).join('');
+  return dialog('Видалити курсанта повністю?',`<p><strong>${e(u.fullName)}</strong><br>Логін: ${e(u.username)}<br>Група: ${e(u.groupName)}</p>${legacy?'<p>У старих рядках немає однозначного ID. Для кожного запису вкажіть, чи належить він цьому курсанту. Позначені для збереження рядки залишаться в таблиці.</p>'+legacy:''}<p>Акаунт, його проходження й відповіді буде видалено із застосунка. Результати з підтвердженим ID та обрані старі рядки буде видалено зі спільної таблиці. Цю дію неможливо скасувати.</p>`,async d=>{
+   const legacyRows=review.rows.map((row,index)=>{const choice=d['legacy-row-'+index];if(!['remove','keep'].includes(choice))throw Error('Оберіть дію для кожного старого рядка.');return {token:row.token,remove:choice==='remove'};});
    let r;
-   try{r=await rpc('DELETE','/api/instructor/users/'+encodeURIComponent(cadetId),{confirmUserId:cadetId},session.token);}
+   try{r=await rpc('DELETE','/api/instructor/users/'+encodeURIComponent(cadetId),{confirmUserId:cadetId,legacyRows},session.token);}
    catch(x){if(S.session?.token!==session.token)return;if(x.code==='NOT_FOUND')x.message='Оновіть серверний Code.gs, щоб увімкнути повне видалення.';await refresh(true);throw x;}
    if(S.session?.token!==session.token)return;
    if(r.deleted!==true||id(r.userId)!==cadetId)throw Error('Сервер не підтвердив видалення цього курсанта. Оновіть дані й перевірте обліковий запис.');
@@ -913,7 +924,7 @@ async function clickAction(button){
    delete a.workspaceRevisions?.results;
    delete a.fullResultsRevision;
    delete S.accounts[cadetId];
-   await persist();render();toast('Акаунт курсанта й результати видалено, спільну Google Таблицю очищено.');await refresh(true);
+   await persist();render();toast(legacyRows.some(row=>!row.remove)?'Акаунт і його результати видалено. Обрані старі рядки залишено.':'Акаунт курсанта й результати видалено, спільну Google Таблицю очищено.');await refresh(true);
   },'Видалити повністю');
  }
 
@@ -980,6 +991,8 @@ window.addEventListener('blur',markAway);
 window.addEventListener('focus',()=>{if(!document.hidden)away=false;});
 window.addEventListener('beforeunload',event=>{if(!alive())return;if(scheduledSave||journalPending||diskWriter.status().pending||journalError||(user()?.role==='cadet'&&examSession.status().pending)){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{if(diskStateLoaded&&alive()&&!updateApplying){clearTimeout(saveTimer);if(user()&&account().run)checkpoint=stamp(runCheckpoint(account().run.test.mode==='exam'));else if(checkpoint)checkpoint={serial:++S.journalSerial,...Object.fromEntries(Object.entries(checkpoint).filter(([k])=>k!=='serial'))};if(typeof secureStorage!=='undefined'&&secureStorage.enabled){if(checkpoint)secureStorage.beacon(checkpoint);}else{if(checkpoint)navigator.sendBeacon('/journal?key='+encodeURIComponent(key),JSON.stringify(checkpoint));const raw=JSON.stringify(S);if(new TextEncoder().encode(raw).length<60000)navigator.sendBeacon('/state?key='+encodeURIComponent(key),raw);}}});
+window.addEventListener('pagehide',()=>hostWindow.close());
+window.addEventListener('pageshow',event=>{if(event.persisted&&alive()&&!updateApplying)hostWindow.open().catch(()=>{});});
 const updater=createUpdater({local,
  canApply:()=>user()&&account().run?'Оновлення готове. Установимо його автоматично після завершення поточного тесту.':working||refreshing||syncing||updateData.flight||exportResultsXlsx.flight||downloadIntakeArchive.flights?.size||intakeRunning||rpcFlights||modal.open||materials.busy?'Оновлення готове. Чекаємо завершення поточної дії…':'',
  save:async release=>{clearTimeout(saveTimer);S.updateReturnPage='more';S.updateTargetCode=release.code;await journalSaving.catch(()=>{});if(checkpoint){const r=secureStorage.enabled?await secureStorage.saveJournal(checkpoint):await local('/journal',checkpoint);if(r.ok===false)throw Error(r.error||'Не вдалося зберегти дані на диску.');}await persist();},

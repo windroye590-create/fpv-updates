@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Real desktop UI and Code.gs, with synthetic accounts and local transport only.
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -20,6 +21,8 @@ assert.throws(()=>api('GET','/api/instructor/instructors',cadet.token),error=>er
 let state={version:1,session:{token:instructorToken,user:actor},accounts:{},groups:[]},journal={},mode='',requestCount=0,releaseHeld=null;
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf'};
 const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+
  try{
   const url=new URL(req.url,'http://localhost');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");

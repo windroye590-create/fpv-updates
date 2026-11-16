@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Two isolated PC profiles, real application and real Code.gs, synthetic data.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,7 +24,9 @@ let held=null;
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf','.mjs':'text/javascript','.wasm':'application/wasm'};
 function seed(key,actor){states.set(key,{version:1,theme:'light',session:actor,groups:[group],accounts:{[actor.user.id]:{tests:[],results:[],cadets:[],fullTests:{},pending:[],reviews:{}}}});journals.set(key,{});}
 seed('pc-one',first);seed('pc-two',second);
-const server=http.createServer(async(req,res)=>{try{
+const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+try{
  const url=new URL(req.url,'http://local'),key=req.headers['x-lk-key'];res.setHeader('Cache-Control','no-store');
  if(url.pathname==='/clock'){res.end(JSON.stringify({ok:true,uptime:100000+performance.now(),launchId:'presence-ui'}));return;}
  if(url.pathname.startsWith('/updates/')){res.end(JSON.stringify({ok:true,state:2,currentVersion:version.version,currentCode:version.versionCode,message:'Установлено актуальну версію.'}));return;}

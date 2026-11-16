@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 // Real application, real Apps Script logic, isolated local transport and identities.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +15,9 @@ const cadet=api('POST','/api/register','',{fullName:'Курсант Excel Інт
 const test=regressionTest('Тест Excel інтерфейс');api('POST','/api/results',cadet.token,regressionBody(test,'excel-ui-result'));
 let state={version:1,theme:'light',session:{token:instructorToken,user:teacher},groups:[],accounts:{}},journal={},dropArchiveOnce=false;
 const checks=[],errors=[],calls=[];
-const server=http.createServer(async(req,res)=>{try{
+const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+try{
  const route=new URL(req.url,'http://localhost').pathname;res.setHeader('Cache-Control','no-store');const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(v));};
  if(['/state','/journal'].includes(route)){if(req.method==='POST'){let raw='';for await(const c of req)raw+=c;if(route==='/state')state=JSON.parse(raw);else journal=JSON.parse(raw);json({ok:true});}else json(route==='/state'?state:journal);return;}
  if(route==='/clock'){json({ok:true,uptime:100000+performance.now(),launchId:'excel-ui'});return;}

@@ -1,3 +1,4 @@
+import {handleHostWindow} from './fixtures/host-window.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -22,7 +23,9 @@ pub.appendRow=function(...a){if(outage)throw Error('Isolated public sheet failur
 const version=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))),root=new URL('../web/',import.meta.url).pathname,states=new Map(),journals=new Map(),errors=[];
 for(const [key,actor] of [['cadet',cadet],['instructor',first],['other',other]]){states.set(key,{version:1,theme:'light',session:actor,groups:[group],accounts:{[actor.user.id]:{tests:[],results:[],cadets:[],fullTests:{},pending:[],reviews:{}}}});journals.set(key,{});}
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.ttf':'font/ttf','.mjs':'text/javascript','.wasm':'application/wasm'};
-const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,'http://local'),key=req.headers['x-lk-key'];res.setHeader('Cache-Control','no-store');
+const server=http.createServer(async(req,res)=>{
+ if(handleHostWindow(req,res))return;
+try{const u=new URL(req.url,'http://local'),key=req.headers['x-lk-key'];res.setHeader('Cache-Control','no-store');
  if(u.pathname==='/clock'){res.end(JSON.stringify({ok:true,uptime:100000+performance.now(),launchId:'public-sync-ui'}));return;}
  if(u.pathname.startsWith('/updates/')){res.end(JSON.stringify({ok:true,state:2,currentVersion:version.version,currentCode:version.versionCode,message:'Актуальна версія'}));return;}
  if(u.pathname==='/state'||u.pathname==='/journal'){const target=u.pathname==='/state'?states:journals;if(req.method==='POST'){const c=[];for await(const b of req)c.push(b);target.set(key,JSON.parse(Buffer.concat(c)));res.end('{"ok":true}');}else res.end(JSON.stringify(target.get(key)||{}));return;}

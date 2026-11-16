@@ -1,5 +1,22 @@
-export const APP_VERSION='1.0.1';
+export const APP_VERSION='1.0.2';
 export const PREVIEW_BUILD=false;
+// Suspended browser timers must not stop the EXE. Closing is an explicit event.
+export function createHostWindow({local,beacon,key,windowId,alive,updating}){
+ let closing=false,connected=false;
+ return {
+  async open(){
+   closing=false;
+   const reply=await local('/window/open',{windowId});
+   connected=reply?.ok===true&&reply.windowLifecycleProtocol===1;
+  },
+  get needsOpen(){return !connected&&!closing;},
+  close(){
+   if(closing||!alive()||updating())return false;
+   closing=beacon('/window/close?key='+encodeURIComponent(key),JSON.stringify({windowId}));
+   return closing;
+  }
+ };
+}
 export const CLOUD_URL='https://script.google.com/macros/s/AKfycbx18jQ0GMTxLODwnA7QIe79fEYmy0nLAobGJaYxrUJA4BHUXvpEtai4hj5ZHUqRXyRsPQ/exec';
 export const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const id=v=>String(v??'');

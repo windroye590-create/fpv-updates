@@ -15,7 +15,6 @@ static char launch_key[65],host[64];
 static WCHAR directory[1024],state_path[1100],temp_path[1100],launch_path[1100],journal_path[1100],journal_temp[1100];
 static CRITICAL_SECTION store_lock;
 static volatile LONG workers;
-static QWORD last_ping;
 static HANDLE process_heap;
 static QWORD journal_serial;
 static SIZE_T slen(const char *s){SIZE_T n=0;while(s[n])n++;return n;}
@@ -98,6 +97,17 @@ static void relay(SOCKET s,char*body,DWORD length){
 #include "updater.h"
 #include "storage.h"
 #include "browser_identity.h"
+#include "window_lifecycle.h"
+
+static void window_route(SOCKET s,const BYTE*body,DWORD length,int opened){
+ SJ_VALUE root,value;char id[37];
+ if(length>128||!sj_valid(body,length,&root)||sj_member(body,length,root,"windowId",&value)!=1||!sj_text(body,value,id,sizeof(id))){error(s,"{\"ok\":false,\"code\":\"BAD_REQUEST\"}");return;}
+ EnterCriticalSection(&store_lock);
+ int ok=window_event(id,opened,GetTickCount64());
+ LeaveCriticalSection(&store_lock);
+ if(ok)json(s,"{\"ok\":true,\"windowLifecycleProtocol\":1}");
+ else error(s,"{\"ok\":false,\"code\":\"BAD_REQUEST\"}");
+}
 
 static DWORD serve(void*argument){
  SOCKET s=(SOCKET)argument;DWORD timeout=10000;setsockopt(s,0xffff,0x1006,(char*)&timeout,4);setsockopt(s,0xffff,0x1005,(char*)&timeout,4);
@@ -122,7 +132,7 @@ static DWORD serve(void*argument){
  const WebExtra*extra=0;for(UINT i=0;i<web_extra_count;i++)if(same(path,web_extras[i].path)){extra=&web_extras[i];break;}
  int static_asset=same(method,"GET")&&(extra!=0||same(path,"/office-import.js")||same(path,"/test-import-sample.docx")||same(path,"/test-import-sample.xlsx")||same(path,"/statement.js")||same(path,"/vendor/jspdf.umd.min.js")||same(path,"/statement-font.ttf")||same(path,"/app.js")||same(path,"/core.js")||same(path,"/style.css")||same(path,"/icon.png")||same(path,"/favicon.ico"));
  if((origin[0]&&!same(origin,expected_origin))||(!static_asset&&!same(key,launch_key))){error(s,"{\"ok\":false,\"code\":\"FORBIDDEN\"}");goto done;}
- last_ping=GetTickCount64();
+ EnterCriticalSection(&store_lock);window_touch(GetTickCount64());LeaveCriticalSection(&store_lock);
  if(same(method,"GET")){
   if(storage_route(s,method,path,0,0,capability))goto done;
   if(extra)response(s,200,extra->mime,extra->data,extra->size);
@@ -144,6 +154,7 @@ static DWORD serve(void*argument){
   else json(s,"{\"ok\":true}");
  }else if(same(method,"POST")){
   while(used<head+length){int n=recv(s,buf+used,(int)(head+length-used),0);if(n<=0)goto done;used+=(DWORD)n;}buf[head+length]=0;
+  if(same(path,"/window/open")||same(path,"/window/close")){window_route(s,(BYTE*)buf+head,length,same(path,"/window/open"));goto done;}
   if(storage_route(s,method,path,(BYTE*)buf+head,length,capability))goto done;
   if(same(path,"/state")){EnterCriticalSection(&store_lock);int r=sf_profile_write((BYTE*)buf+head,length);if(r==1)json(s,"{\"ok\":true}");else storage_failure(s,r<0?"STORAGE_CONFLICT":"STORAGE_WRITE");LeaveCriticalSection(&store_lock);}
   else if(same(path,"/journal"))storage_failure(s,"FORBIDDEN");
@@ -233,7 +244,21 @@ void mainCRTStartup(void){
  if(migrate)EnumWindows(close_migrated_window,0);
  if((!resumed||migrate)&&!launch_browser(url)){MessageBoxW(0,L"Для інтерфейсу потрібен Microsoft Edge або Google Chrome.",TITLE,16);ExitProcess(1);}
  browser_identity_start();
- last_ping=GetTickCount64();QWORD last_poll=last_ping;
- for(;;){if(__atomic_load_n(&update_restart_requested,__ATOMIC_SEQ_CST))break;QWORD now=GetTickCount64();if(now-__atomic_load_n(&update_checked_at,__ATOMIC_SEQ_CST)>21600000u&&!update_busy)update_start();if(now-last_poll>5000u)last_ping=now;last_poll=now;if(now-last_ping>=240000u)break;FD_SET readset;readset.count=1;readset.sockets[0]=server;TIMEVAL wait={1,0};int ready=select(0,&readset,0,0,&wait);if(ready>0){SOCKET client=accept(server,0,0);if(client!=INVALID_SOCKET){if(__atomic_add_fetch(&workers,1,__ATOMIC_SEQ_CST)>8){__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}else{HANDLE thread=CreateThread(0,0,serve,(void*)client,0,0);if(thread)CloseHandle(thread);else{__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}}}}}
+ window_started=GetTickCount64();
+ for(;;){
+  if(__atomic_load_n(&update_restart_requested,__ATOMIC_SEQ_CST))break;
+  QWORD now=GetTickCount64();
+  if(now-__atomic_load_n(&update_checked_at,__ATOMIC_SEQ_CST)>21600000u&&!update_busy)update_start();
+  EnterCriticalSection(&store_lock);int closed=window_should_exit(now);LeaveCriticalSection(&store_lock);
+  if(closed&&!__atomic_load_n(&workers,__ATOMIC_SEQ_CST))break;
+  FD_SET readset;readset.count=1;readset.sockets[0]=server;TIMEVAL wait={1,0};
+  int ready=select(0,&readset,0,0,&wait);
+  if(ready>0){SOCKET client=accept(server,0,0);if(client!=INVALID_SOCKET){
+   if(__atomic_add_fetch(&workers,1,__ATOMIC_SEQ_CST)>8){
+    __atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);
+    json(client,"{\"ok\":false,\"code\":\"BUSY\",\"error\":\"Локальний модуль зайнятий. Зачекайте й повторіть дію.\"}");closesocket(client);
+   }else{HANDLE thread=CreateThread(0,0,serve,(void*)client,0,0);if(thread)CloseHandle(thread);else{__atomic_sub_fetch(&workers,1,__ATOMIC_SEQ_CST);closesocket(client);}}
+  }}
+ }
  __atomic_store_n(&update_closing,1,__ATOMIC_SEQ_CST);closesocket(server);browser_identity_stop();while(workers)Sleep(100);WSACleanup();ExitProcess(0);
 }
