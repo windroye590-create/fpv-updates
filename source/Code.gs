@@ -122,7 +122,7 @@ function doGet() {
     ok: true,
     service: 'FPV Комісія',
     version: API_VERSION,
-    serverBuild: 'pc-api26-acac48e64011cc1f',
+    serverBuild: 'pc-api26-dad85abad7c3d093',
     resultDeletion: true,
     singleAttempt: true,
     privateLocalStorage: true,
