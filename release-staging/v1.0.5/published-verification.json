@@ -1,0 +1,21 @@
+{
+  "status": "passed",
+  "version": "1.0.5",
+  "code": 6,
+  "releaseUrl": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.5",
+  "sourceCommit": "1ae0ab74babf83b4ed6a7b5918aa1313717de703",
+  "publicCatalogSignatureVerified": true,
+  "publicExecutableMatchesChannel": true,
+  "sha256": "ac98986457aba6030f0022faddc68ced4b5d9049793a7cab40b5006d1598a6fc",
+  "size": 8682475,
+  "serverChanged": false,
+  "serverBuild": "pc-api26-dad85abad7c3d093",
+  "desktopUI": 54,
+  "responsiveUI": 306,
+  "releaseWorkflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/43937120917",
+  "verifiedAt": "2026-11-16T19:18:59.715868+00:00",
+  "publishedWindowsAudit": "https://github.com/windroye590-create/fpv-updates/actions/runs/43937951120",
+  "publishedWindowsAuditConclusion": "success",
+  "publishedWindowsStorage": 16,
+  "releaseWorkflowConclusion": "success"
+}
