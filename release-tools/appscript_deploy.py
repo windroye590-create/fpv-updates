@@ -91,6 +91,31 @@ def content_hash(files):
     return hashlib.sha256(raw).hexdigest()
 
 
+def same_release_sources(left, right):
+    """Ignore manifest JSON formatting while retaining every setting and script."""
+    def unique_object(pairs):
+        result = {}
+        for name, value in pairs:
+            require(name not in result, 'Duplicate manifest property')
+            result[name] = value
+        return result
+    def reject_constant(value):
+        raise ValueError('Nonstandard manifest number')
+    def normalized(files):
+        result = copy.deepcopy(files)
+        for file in result:
+            if file['name'] == 'appsscript' and file['type'] == 'JSON':
+                manifest = json.loads(file['source'], object_pairs_hook=unique_object,
+                                      parse_constant=reject_constant)
+                require(isinstance(manifest, dict), 'Manifest must be an object')
+                file['source'] = manifest
+        return content_hash(result)
+    try:
+        return normalized(left) == normalized(right)
+    except (ValueError, TypeError):
+        return False
+
+
 def semantic_hash(source):
     # UI-only releases need no server deployment just to advertise a new EXE number.
     source = re.sub(r"^const LATEST_APP_VERSION_(?:CODE|NAME) = [^\n]+;\s*$", '', source,
@@ -162,7 +187,7 @@ def plan(client, settings, path, check=health):
     local = path.read_text(encoding='utf-8')
     target = source_info(local, settings)
     changed = target['sha256'] != live['sha256']
-    require(not changed or content_hash(head) == content_hash(deployed),
+    require(not changed or same_release_sources(head, deployed),
             'Apps Script contains unpublished edits; publish or save them before automatic release')
     build = 'pc-api' + str(target['api']) + '-' + target['sha256'][:16] if changed else live['build']
     local = re.sub(r"serverBuild:\s*'[^']+'", "serverBuild: '" + build + "'", local)
@@ -184,7 +209,7 @@ def apply(client, settings, path, receipt, check=health):
     if not receipt['changed']:
         require(semantic_hash(local) == live['sha256'], 'Server code differs from verified plan')
         return {**check(settings, live['build'], attempts=15), 'deployed': False, 'version': version}
-    require(content_hash(head) == content_hash(deployed), 'Unpublished server edits appeared')
+    require(same_release_sources(head, deployed), 'Unpublished server edits appeared')
     files = copy.deepcopy(head)
     server_file(files)['source'] = local
     new_version = None

@@ -118,6 +118,73 @@ class DeploymentTests(unittest.TestCase):
             self.apply(receipt)
         self.assertEqual(self.client.writes, [])
 
+    def test_manifest_formatting_is_preserved_without_changing_its_settings(self):
+        draft = json.dumps(json.loads(self.files[1]['source']), indent=2) + '\n'
+        self.client.head[1]['source'] = draft
+        receipt = self.plan()
+        self.assertEqual(receipt['headSHA256'], gas.content_hash(self.client.head))
+        self.assertEqual(self.client.writes, [])
+        self.assertTrue(self.apply(receipt)['deployed'])
+        self.assertEqual(self.client.head[1]['source'], draft)
+        self.assertEqual(self.client.head[-1], self.files[-1])
+
+    def test_manifest_key_order_is_ignored_but_all_values_are_compared(self):
+        before = copy.deepcopy(self.files)
+        after = copy.deepcopy(self.files)
+        before[1]['source'] = '{"timeZone":"Europe/Kyiv","webapp":{"access":"ANYONE_ANONYMOUS","executeAs":"USER_DEPLOYING"}}'
+        after[1]['source'] = '{ "webapp": {"executeAs":"USER_DEPLOYING", "access":"ANYONE_ANONYMOUS"}, "timeZone":"Europe/Kyiv" }'
+        self.assertTrue(gas.same_release_sources(before, after))
+        self.assertNotEqual(gas.content_hash(before), gas.content_hash(after))
+
+    def test_manifest_setting_changes_still_block_deployment_before_writes(self):
+        for change in [
+            {'timeZone': 'Europe/Istanbul'},
+            {'timeZone': 'Europe/Kyiv', 'oauthScopes': ['https://www.googleapis.com/auth/drive']},
+            {'timeZone': 'Europe/Kyiv', 'webapp': {'access': 'ANYONE'}},
+            {'timeZone': 'Europe/Kyiv', 'unknownFutureSetting': True},
+        ]:
+            with self.subTest(change=change):
+                self.client.head[1]['source'] = json.dumps(change, indent=2)
+                with self.assertRaisesRegex(ValueError, 'unpublished edits'):
+                    self.plan()
+                self.assertEqual(self.client.writes, [])
+
+    def test_ambiguous_or_invalid_manifest_json_never_bypasses_draft_protection(self):
+        for draft in ['{"timeZone":"private","timeZone":"Europe/Kyiv"}',
+                      '{"timeZone":"Europe/Kyiv","unknown":NaN}', '[]', '{']:
+            with self.subTest(draft=draft):
+                self.client.head[1]['source'] = draft
+                with self.assertRaisesRegex(ValueError, 'unpublished edits'):
+                    self.plan()
+                self.assertEqual(self.client.writes, [])
+
+    def test_manifest_reformat_after_plan_remains_a_concurrent_edit(self):
+        receipt = self.plan()
+        self.client.head[1]['source'] = json.dumps(json.loads(self.files[1]['source']), indent=2)
+        with self.assertRaisesRegex(ValueError, 'changed after preparation'):
+            self.apply(receipt)
+        self.assertEqual(self.client.writes, [])
+
+    def test_formatted_manifest_does_not_allow_other_unpublished_files(self):
+        self.client.head[1]['source'] = json.dumps(json.loads(self.files[1]['source']), indent=2)
+        self.client.head[-1]['source'] += '\n// private draft work'
+        with self.assertRaisesRegex(ValueError, 'unpublished edits'):
+            self.plan()
+        self.assertEqual(self.client.writes, [])
+
+    def test_failed_release_restores_the_original_formatted_manifest(self):
+        self.client.head[1]['source'] = json.dumps(json.loads(self.files[1]['source']), indent=2)
+        original = copy.deepcopy(self.client.head)
+        receipt = self.plan()
+        def failed_health(settings, build, **kwargs):
+            if build != 'previous':
+                raise RuntimeError('New server failed health')
+            return self.check(settings, build)
+        with self.assertRaisesRegex(RuntimeError, 'previous deployment restored'):
+            self.apply(receipt, failed_health)
+        self.assertEqual(self.client.head, original)
+        self.assertEqual(self.client.deployment['deploymentConfig']['versionNumber'], 7)
+
     def test_database_or_api_change_is_rejected(self):
         for target in [self.old.replace(self.settings['spreadsheetId'], 'different-db'),
                        self.old.replace('API_VERSION = 26', 'API_VERSION = 27')]:
