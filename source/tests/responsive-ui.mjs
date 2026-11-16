@@ -78,13 +78,19 @@ async function audit(name){
 }
 async function allSizes(name){for(const size of sizes){await page.setViewportSize(size);await audit(name+` ${size.width}×${size.height}`);}}
 async function navigate(next){
- await page.evaluate(n=>{
-  // Keep the promise reachable while DevTools waits and Chromium collects the
-  // large responsive fixtures. Otherwise CDP can lose the evaluated promise.
-  const navigation=import('/app.js').then(app=>app.navigate(n));
-  globalThis.__responsiveNavigation=navigation;
-  return navigation;
+ const sequence=await page.evaluate(n=>{
+  // Poll completion instead of asking CDP to await a collectable promise.
+  // Navigation errors and writes must still finish before the next check.
+  const state={sequence:(globalThis.__responsiveNavigationState?.sequence||0)+1,done:false,error:null};
+  globalThis.__responsiveNavigationState=state;
+  globalThis.__responsiveNavigation=import('/app.js').then(app=>app.navigate(n)).then(
+   ()=>{state.done=true;},error=>{state.error=String(error?.stack||error);state.done=true;});
+  return state.sequence;
  },next);
+ if(process.env.FPV_RESPONSIVE_FORCE_GC)await page.requestGC();
+ await page.waitForFunction(sequence=>globalThis.__responsiveNavigationState?.sequence===sequence&&globalThis.__responsiveNavigationState.done,sequence,{timeout:30000});
+ const error=await page.evaluate(()=>globalThis.__responsiveNavigationState.error);
+ assert.equal(error,null,'Navigation to '+next+' must complete successfully');
 }
 const action=act=>page.locator(`button[data-action="${act}"]`).first().click();
 try{
