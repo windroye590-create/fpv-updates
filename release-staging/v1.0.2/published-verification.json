@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "version": "1.0.2",
+  "code": 3,
+  "releaseId": 447294014,
+  "releaseUrl": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.2",
+  "stable": true,
+  "allFourAssetsMatchCommittedChannel": true,
+  "fpvSignatureVerified": true,
+  "bothCommissionsRejectEachOthersCatalogs": true,
+  "latestDownloadVerified": true,
+  "size": 8680427,
+  "sha256": "fa27529eedf5117bdb3ad50b531d571ea20de7956652892738fc44bcf8839946",
+  "verifiedAt": "2026-11-16T16:28:08.749010+00:00",
+  "sourceCommit": "71c2a600472c4783786d229187d05a5353ff3ecb",
+  "sourceArchiveSHA256": "95d63b30db70225ab60a43fd1cd054298f41d16a672a20c2af3dc8f2a1856993",
+  "server": {
+    "status": "passed",
+    "api": 26,
+    "service": "FPV Комісія",
+    "serverBuild": "pc-api26-dad85abad7c3d093",
+    "spreadsheetLayoutReady": true
+  },
+  "checks": {
+    "desktopUI": 54,
+    "responsiveUI": 308,
+    "packedStartup": 10,
+    "signedUpdateProtocol": 29,
+    "nativeLauncher": 12,
+    "publishedWindowsStorage": 16,
+    "windowsIdentityAndMigration": 8
+  },
+  "windowsIdentityWorkflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/43905995731",
+  "releaseWorkflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/43906733955",
+  "releaseWorkflowConclusion": "success",
+  "publishedWindowsAudit": "https://github.com/windroye590-create/fpv-updates/actions/runs/43907631704",
+  "publishedWindowsAuditConclusion": "success"
+}
