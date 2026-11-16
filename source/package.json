@@ -1,6 +1,6 @@
 {
   "name": "fpv-komisiia-pc",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -41,5 +41,5 @@
     "playwright": "1.62.1"
   },
   "executableName": "FPV-Komisiia-PC.exe",
-  "versionCode": 5
+  "versionCode": 6
 }

@@ -329,3 +329,6 @@ body.dark .choice-review.incorrect{border-color:#f87171;background:#450a0a}
 .intake-archive-entry small,.intake-archive-entry p{color:var(--muted);margin:6px 0 0}
 .intake-archive-entry button{flex-shrink:0}
 @media(max-width:480px){.intake-archive-entry{flex-wrap:wrap}.intake-archive-entry button{width:100%}}
+
+.editor-field-help{margin:-8px 0 0;color:var(--muted);font-size:13px;line-height:1.5;font-weight:400;overflow-wrap:anywhere}
+.editor-field-help>span{display:block;margin-top:4px}
