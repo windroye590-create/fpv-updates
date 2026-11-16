@@ -1,4 +1,4 @@
-export const APP_VERSION='1.0.2';
+export const APP_VERSION='1.0.3';
 export const PREVIEW_BUILD=false;
 // Suspended browser timers must not stop the EXE. Closing is an explicit event.
 export function createHostWindow({local,beacon,key,windowId,alive,updating}){
