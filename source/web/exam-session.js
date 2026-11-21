@@ -44,19 +44,20 @@ export function createExamSession({session,account,deviceId,rpc,persist,now,chan
   validate(reply,s);if(!current(s))return false;
   const v=reply.document.value,old=a.run;
   readyToken=s.token;
+  // The runner already owns the complete attempt. This obsolete second copy
+  // was never read and doubled the initial private question-object writes.
+  delete a.examAvailable;
   if(reply.completion){
    if(old?.submissionId===v?.submissionId||!old){a.run=null;delete a.examRequest;await completed(reply.completion,s,a);}
-   a.examAvailable=null;anchor=null;await persistLocal();return true;
+   anchor=null;await persistLocal();return true;
   }
   if(!v){
-   a.examAvailable=null;
    if(reply.attemptDeleted===true&&old?.examProtocol===1&&String(old.test.id)===String(reply.deletedTestId)){
     a.examBackups??=[];a.examBackups.unshift({submissionId:old.submissionId,testId:old.test.id,...checkpoint(old)});a.examBackups=a.examBackups.slice(0,5);
     a.run=null;delete a.examRequest;await persistLocal();changed();
    }
    return true;
   }
-  a.examAvailable={...copy(v),revision:reply.document.revision};
   const received=now(),sent=requestTimes.get(reply)??received;
   // The send time gives a conservative bound when the response is delayed.
   // A later clock sample must never move this attempt's timer backwards.

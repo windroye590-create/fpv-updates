@@ -1,6 +1,5 @@
 import * as C from './core.js';
 import {reportModel,xlsxBytes,reportFilename,XLSX_MIME} from './excel-report.js';
-import {learningUnits,learningSummary} from './learning.js';
 import {readWorkspace,workspaceRequest} from './workspace.js';
 import {latestResults} from './result-attempts.js';
 import {createDurableWriter} from './durability.js';
@@ -8,13 +7,12 @@ import {createSecureStorage} from './secure-storage.js';
 import {createAccountSync} from './account-sync.js';
 import {createExamSession} from './exam-session.js';
 import {createUpdater} from './updater.js';
-import {createMaterials} from './materials.js';
 import {createCadetCard} from './cadet-card.js';
 import {createReviewPresence,reviewPresenceMarkup} from './review-presence.js';
 import {createPublicTableSync} from './public-table-sync.js';
 import {importOffice,importQuestionError,OFFICE_MAX_BYTES} from './office-import.js';
 import {statementTests,buildStatement,statementPdf} from './statement.js';
-import {compactResults,buildRanking,searchRanking,rankingTable,rankingCSV} from './results.js';
+import {compactResults,createRankingCache,searchRanking,rankingTable,rankingCSV} from './results.js';
 const $=s=>document.querySelector(s),app=$('#app'),modal=$('#modal');
 // Native browser prompts otherwise follow Windows/browser language, even with lang=uk.
 document.addEventListener('invalid',event=>{
@@ -54,21 +52,21 @@ const e=C.esc,id=C.id;
 const user=()=>S.session?.user;
 const instructor=()=>user()?.role==='instructor';
 const listPages=Object.create(null),cadetViews=new WeakMap(),sharedTestSearches=new WeakMap();
+const cachedRanking=createRankingCache();
 const instructorRequests=new Map();
 function resetPage(name){listPages[name]=1;}
 function paginate(name,items){const p=C.pageSlice(items,listPages[name]);listPages[name]=p.page;return {...p,controls:p.total>C.LIST_PAGE_SIZE?`<nav class="list-pager" aria-label="Сторінки списку"><span role="status">${p.start}–${p.end} із ${p.total}</span><div class="actions"><button data-action="list-page" data-list="${e(name)}" data-index="${p.page-1}" ${p.page===1?'disabled':''}>← Попередні</button><span>Сторінка ${p.page} із ${p.pages}</span><button data-action="list-page" data-list="${e(name)}" data-index="${p.page+1}" ${p.page===p.pages?'disabled':''}>Наступні →</button></div></nav>`:''};}
 const reviewPresence=createReviewPresence({session:()=>S.session,rpc,onChange:updateReviewPresenceUI,clientId:reviewClientId});
 const publicTableSync=createPublicTableSync({session:()=>S.session,account,rpc,changed:()=>{scheduleSave();updatePublicTableSyncUI();}});
-let reviewQueueFlight=null,reviewQueueError='',reviewQueueAt=0,reviewQueueRevision=null,reviewPollFlight=null,reviewPollUnavailableUntil=0,reviewQueueToken='',reviewQueueUpdatedAt=0;
-const materials=createMaterials({matches:m=>matchesMaterial(m),paginate,resetPage,account,session:()=>S.session,rpc,persist,toast,render,dialog,confirmAction,modal,esc:C.esc,groups:()=>S.groups,tests:()=>account().tests,startTest:start,alive,filters:materialFilterControls,scheduleSave});
+let reviewQueueFlight=null,reviewQueueError='',reviewQueueAt=0,reviewQueueRevision=null,reviewPollFlight=null,reviewPollUnavailableUntil=0,reviewQueueToken='',reviewQueueUpdatedAt=0,reviewQueueFullAt=0;
 const cadetCard=createCadetCard({account,session:()=>S.session,rpc,persist,render,toast,paginate,resetPage,scheduleSave,openGrading,isOpen:()=>page==='cadet-card'});
 function account(){const k=id(user()?.id),a=S.accounts[k]??= {tests:[],results:[],cadets:[],fullTests:{},pending:[],reviews:{},draft:null,run:null,updatedAt:0,resultTotal:0};a.reviews??={};a.examRecoveries??=[];for(const [rid,draft] of Object.entries(a.gradingDrafts||{})){if(draft?.items&&Object.keys(draft.items).length===0)delete a.gradingDrafts[rid];}{if(!cadetViews.has(a.tests)){const safe=C.cadetTests(a.tests);cadetViews.set(a.tests,safe);cadetViews.set(safe,safe);}a.tests=cadetViews.get(a.tests);}return a;}
 function resetSessionViews(){
  bank=[];audit=[];analytics=null;preview=null;lastResult=null;grading=null;filter='';menuOpen=false;
- reviewQueue=[];examRecoveryQueue=[];reviewQueueFlight=null;reviewQueueToken='';reviewQueueUpdatedAt=0;reviewQueueAt=0;reviewQueueRevision=null;reviewQueueError='';
+ reviewQueue=[];examRecoveryQueue=[];reviewQueueFlight=null;reviewQueueToken='';reviewQueueUpdatedAt=0;reviewQueueFullAt=0;reviewQueueAt=0;reviewQueueRevision=null;reviewQueueError='';
  loadAnalytics.flight=null;loadAnalytics.error='';exportResultsXlsx.flight=null;downloadIntakeArchive.flights?.clear();instructorRequests.clear();
  for(const name of Object.keys(listPages))delete listPages[name];
- materials.reset();modal.close();modal.innerHTML='';
+ modal.close();modal.innerHTML='';
 }
 function instructorsPanel(){
  const a=account(),state=instructorRequests.get(S.session.token)||{},all=a.instructors||[];
@@ -140,7 +138,7 @@ function updateData(){
   render();await persist();if(!current())return;
   const queue=syncQueue.completion;if(queue?.token===token)await queue.promise;if(!current())return;
   await syncQueue(true);if(!current())return;
-  await materials.syncProgress();if(!current())return;
+
   await refresh(true);const workspace=refresh.completion;if(workspace?.token===token)await workspace.promise;if(!current())return;
   if(pendingReviewsPage()&&reviewQueueFlight?.token===token)await reviewQueueFlight.promise;if(!current())return;
   if(page==='bank')await navigate('bank');else if(page==='analytics')await loadAnalytics();if(!current())return;
@@ -255,7 +253,6 @@ function sharedFilters(scope='results'){const a=account();a.sectionFilters??={re
 function selectedGroup(scope='results'){return S.groups.find(g=>id(g.id)===id(sharedFilters(scope).groupId));}
 function matchesTest(t){if(!instructor())return true;const g=selectedGroup('tests'),groups=C.groupsFrom(t.description);return !g||!groups.length||groups.includes(g.name);}
 function matchesResult(r){if(!instructor())return true;const f=sharedFilters(),g=selectedGroup();return (!g||r.groupName===g.name)&&(!f.testId||id(r.testId)===id(f.testId));}
-function matchesMaterial(m){if(!instructor())return true;const f=sharedFilters('materials');return (!f.groupId||m.groupIds.map(id).includes(id(f.groupId)))&&(!f.testId||id(m.testId)===id(f.testId));}
 function sharedTestChoices(scope='results'){
  const a=account(),f=sharedFilters(scope),all=statementTests(a.tests,a.results),search=sharedTestSearches.get(a)?.[scope]||'',query=search.trim().toLocaleLowerCase('uk-UA');
  const matches=query?all.filter(t=>[t.title,id(t.id)].join(' ').toLocaleLowerCase('uk-UA').includes(query)):all,visible=matches.slice(0,C.LIST_PAGE_SIZE),selected=all.find(t=>id(t.id)===id(f.testId));
@@ -265,7 +262,6 @@ function sharedTestChoices(scope='results'){
 }
 function groupFilterControl(scope){const f=sharedFilters(scope);return `<label class="field group-filter">Група<select id="shared-group"><option value="">Усі групи</option>${S.groups.map(g=>`<option value="${e(g.id)}" ${id(f.groupId)===id(g.id)?'selected':''}>${e(g.name)}${g.archived?' · архів':''}</option>`).join('')}</select></label>`;}
 function sharedFilterBar(scope='results'){if(!instructor())return '';const choices=sharedTestChoices(scope);return `<section class="shared-filters" aria-label="Фільтри розділу">${groupFilterControl(scope)}<div class="field shared-test-picker">${choices.searchable?`<label for="shared-test-search">Знайти тест для фільтра</label><input id="shared-test-search" aria-controls="shared-test" placeholder="Назва або номер тесту…" value="${e(choices.search)}">`:''}<label for="shared-test">Тест</label><select id="shared-test" ${choices.searchable?'aria-describedby="shared-test-matches"':''}>${choices.options}</select>${choices.searchable?`<small id="shared-test-matches" role="status">${e(choices.hint)}</small>`:''}</div><button data-action="reset-filters">Скинути фільтри</button></section>`;}
-function materialFilterControls(){if(!instructor())return '';const a=account(),f=sharedFilters('materials'),count=Number(!!f.groupId)+Number(!!f.testId),group=selectedGroup('materials'),test=statementTests(a.tests,a.results).find(t=>id(t.id)===id(f.testId)),summary=[group?.name,test?.title].filter(Boolean).join(' · ');return `<div class="material-filter-toggle"><button data-action="toggle-material-filters" aria-expanded="${!!a.materialFiltersOpen}" aria-controls="material-filters">Фільтри${count?` <span class="result-tab-count">${count}</span>`:''}</button>${count?`<span class="muted">${e(summary||'Застосовано фільтри')}</span>`:''}</div><div id="material-filters" ${a.materialFiltersOpen?'':'hidden'}>${sharedFilterBar('materials')}</div>`;}
 async function loadAnalytics(){
  const session=S.session;if(!session||!instructor())return false;
  const a=account(),f={...sharedFilters('analytics')},origin=page;
@@ -293,7 +289,7 @@ async function bulkAssignment(){
  },'Застосувати призначення');
 }
 function layout(content){
- const nav=instructor()?[['home','Головна'],['tests','Тести'],['materials','Матеріали'],['groups','Групи'],['cadets','Курсанти'],['results','Результати']]:[['home','Головна'],['tests','Мої тести'],['materials','Матеріали'],['results','Мої результати'],['more','Профіль']];
+ const nav=instructor()?[['home','Головна'],['tests','Тести'],['groups','Групи'],['cadets','Курсанти'],['results','Результати']]:[['home','Головна'],['tests','Мої тести'],['results','Мої результати'],['more','Профіль']];
  const u=user(),a=account(),navPage=page==='bank'?'tests':page==='cadet-card'||page==='grading'&&grading?.origin?.page==='cadet-card'?'cadets':instructor()&&['grading','reviews'].includes(page)?'results':page;
  return `<div class="layout"><aside class="sidebar${menuOpen?' menu-open':''}"><div class="sidebar-top"><div class="brand"><img src="/icon.png" alt=""><div><strong>FPV<br>Комісія</strong><small>Версія для ПК</small></div></div><button class="menu-toggle" data-action="toggle-menu" aria-expanded="${menuOpen}" aria-controls="primary-navigation">${svg('menu')}<span>${menuOpen?'Закрити меню':'Меню'}</span></button></div><div class="sidebar-panel" id="primary-navigation"><div><div class="eyebrow" style="margin:0 12px 10px">${instructor()?'Кабінет інструктора':'Кабінет курсанта'}</div><nav class="nav" aria-label="Головне меню">${nav.map(([n,l])=>`<button data-action="nav" data-page="${n}" class="${navPage===n?'active':''}" ${navPage===n?'aria-current="page"':''}>${svg(n)}${l}${n==='results'&&instructor()?reviewCountBadge():''}</button>`).join('')}</nav></div><div class="sidebar-footer">${instructor()?`<nav class="nav nav-settings" aria-label="Налаштування"><button data-action="nav" data-page="more" class="${page==='more'?'active':''}" ${page==='more'?'aria-current="page"':''}>${svg('more')}Налаштування</button></nav>`:''}<div class="user"><div class="avatar">${e(C.nameOf(u).split(' ').map(w=>w[0]||'').slice(0,2).join(''))}</div><div class="info"><strong>${e(C.nameOf(u))}</strong>${C.titleOf(u)===C.nameOf(u)?'':'<small>'+e(C.titleOf(u))+'</small>'}</div></div><button data-action="logout" class="small">Вийти з облікового запису</button><small style="font-size:10px">Windows · ${e(C.APP_VERSION)}${C.PREVIEW_BUILD?' · Перегляд':''}</small></div></div></aside><main class="main${page==='results'&&rankingActive()?' ranking-page':''}"><header class="topbar"><small>${status()}</small><div class="top-actions">${a.pending.length?`<button data-action="sync">Черга: ${a.pending.length}</button>`:''}<button data-action="theme" aria-label="Змінити тему">${S.theme==='dark'?'☀ Світла':'◐ Темна'}</button>${syncAccountButton()}</div></header>${storageNotice(true)}${publicTableSyncNotice()}${notice()}${intakeNotice()}${content}</main></div>`;
 }
@@ -305,10 +301,6 @@ function home(){
  const a=account(),u=user(),currentResults=instructor()?a.results:latestResults(a.results,a.tests,{byGroup:false}),latest=currentResults.slice(0,5),draft=a.draft;
  const completed=C.completedTestIds(a.results,a.pending,a.run,a.examRecoveries,a.deletedTestIds),testCount=a.tests.length,available=a.tests.filter(t=>!completed.has(id(t.id))&&t.access?.open!==false).length;
  return head(instructor()?'Кабінет інструктора':'Вітаємо, '+e(C.nameOf(u).split(' ')[1]||C.nameOf(u).split(' ')[0]),instructor()?'Тести, групи й результати — в одному місці.':e(u.groupName||'Ваше навчання'))+`<section class="hero"><div><div class="eyebrow">${instructor()?'Підготовка без зайвих кроків':'Ваш навчальний простір'}</div><h2>${instructor()?'Навчання під контролем':'Готові до наступного тесту?'}</h2><p>${instructor()?'Тести, чернетки й перевірка робіт доступні з різних ПК після входу в акаунт. Дочекайтеся підтвердження синхронізації перед зміною комп’ютера.':'Тести й результати доступні на всіх ПК після входу в акаунт. Кожен тест можна пройти один раз.'}</p><button data-action="${instructor()?'new-test':'nav'}" ${instructor()?'':'data-page="tests"'}>${instructor()?'+ Створити тест':'Перейти до тестів'} →</button></div></section><div class="cards">${stat('Тести',testCount,instructor()?'Доступні у вашому кабінеті':'У вашій навчальній групі')}${stat(instructor()?'Курсанти':'Можна пройти',instructor()?a.cadets.length:available,instructor()?'У спільній системі':'Без завершених спроб')}${stat('Результати',instructor()?(a.resultTotal||a.results.length):currentResults.length,'Синхронізовані проходження')}${stat(instructor()?'Групи':'У черзі',instructor()?S.groups.length:a.pending.length,instructor()?'Навчальні групи':'Очікують відправлення')}</div><div class="grid"><section class="panel"><div class="panel-heading"><h2>Останні результати</h2><button class="small" data-action="nav" data-page="results">Усі →</button></div>${latest.length?latest.map(r=>`<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding:12px 0"><div><h3>${e(r.testTitle)}</h3><small>${e(instructor()?r.userName:date(r.completedAt))}</small></div><strong>${e(C.resultLabel(r))}</strong></div>`).join(''):'<p class="muted" style="font-size:12px">Результати з’являться після проходження тестів.</p>'}</section><section class="panel"><div class="panel-heading"><h2>${instructor()?'Швидкі дії':'Продовжити навчання'}</h2></div>${instructor()?`<p class="muted" style="font-size:12px;margin-bottom:20px">Робота автоматично зберігається в акаунті після підключення.</p><div class="actions"><button data-action="new-test">+ Новий тест</button><button data-action="nav" data-page="groups">Групи</button></div>${draft?`<div class="notice" style="margin-top:20px;margin-bottom:0"><strong>${e(draft.title||'Незавершений тест')}</strong><br>${draft.questions.length} пит. · незавершена чернетка <button data-action="edit-draft" class="small" style="margin:10px 0 0">Продовжити →</button></div>`:''}`:a.run?`<p>Незавершений тест: ${e(a.run.test.title)}</p><button data-action="resume" style="margin-top:15px">Продовжити →</button>`:`<p class="muted" style="font-size:12px;margin-bottom:20px">Для початку тесту потрібне підключення й відкритий доступ. Розпочате тренування можна завершити без інтернету; результат надішлеться після підключення.</p><button data-action="download-all">Завантажити доступні тести</button>`}</section></div>`;
-}
-function learning(){
- const a=account(),units=learningUnits(a.tests,a.materials||[],a.materialProgress||{},a.results,a.pending,a.run,a.examRecoveries,a.deletedTestIds),summary=learningSummary(units),p=paginate('learning',units);
- return `<section class="learning-overview"><div class="page-head"><div><h2>Навчальний прогрес</h2><p>Матеріал → тест → перевірка відповідей</p></div><button data-action="nav" data-page="materials">Усі матеріали</button></div><div class="panel"><strong>Завершено тестів: ${summary.completed} із ${summary.total} · складено: ${summary.passed}</strong><progress max="${summary.total||1}" value="${summary.completed}" aria-label="Завершено тестів"></progress><p>Перегляд сторінок показує роботу з матеріалом. Знання перевіряє тест.</p></div>${summary.needsAttention.length?`<div class="notice warn"><strong>Що повторити</strong>${summary.needsAttention.slice(0,5).map(u=>`<p>${e(u.test.title)} · ${u.result.score}%</p>`).join('')}<p>Перегляньте матеріали та свої відповіді. Повторне проходження недоступне.</p></div>`:''}<div class="grid">${p.items.map(u=>`<article class="test-card learning-unit"><h3>${e(u.test.title)}</h3><span class="tag ${u.result?.passed?'done':''}">${e(u.status)}</span>${u.reading.map(({material:m,page})=>`<div><strong>${e(m.title)}</strong><small>Переглянуто до ${page} із ${m.pageCount} стор.</small><button class="small" data-action="material-open" data-id="${e(m.id)}">${page?'Продовжити матеріал':'Відкрити матеріал'}</button></div>`).join('')}<div class="actions">${u.result?`<button data-action="review-result" data-id="${e(u.result.id)}">Перевірка відповідей</button>`:u.active?'<button data-action="resume">Продовжити тест</button>':u.canStart?`<button class="primary" data-action="start" data-id="${e(u.test.id)}">До тесту</button>`:''}</div></article>`).join('')||empty('Навчальний план порожній','Тести з’являться після призначення інструктором.')}</div>${p.controls}</section>`;
 }
 function catalogTestState(t){
  if(!t.published)return {label:'Чернетка',kind:'draft',note:''};
@@ -333,7 +325,7 @@ function pendingReviewsActive(){return instructor()&&resultsView()==='pending';}
 function pendingReviewsPage(){return page==='results'&&pendingReviewsActive();}
 function matchesResultQuery(r){return matchesResult(r)&&[r.userName,r.groupName,r.testTitle].join(' ').toLocaleLowerCase('uk-UA').includes(filter.trim().toLocaleLowerCase('uk-UA'));}
 function filteredResults(){const a=account();return (instructor()?a.results:latestResults(a.results,a.tests,{byGroup:false})).filter(matchesResultQuery);}
-function groupRanking(){const group=selectedGroup();return group?searchRanking(buildRanking(account(),group.name),filter):null;}
+function groupRanking(){const group=selectedGroup();return group?searchRanking(cachedRanking(account(),group.name),filter):null;}
 function pendingReviewBadge(){const known=reviewQueueToken===S.session?.token,count=reviewQueue.filter(matchesResult).length+examRecoveryQueue.filter(matchesResult).length;return `<span id="pending-review-count" class="result-tab-count" title="Робіт у вибраній групі та тесті">${known?count:'…'}</span>`;}
 function resultsTabs(){const selected=resultsView();return `<div class="results-switch" role="tablist" aria-label="Результати та перевірка">${[['compact','Усі результати'],['pending','Очікують перевірки'],['ranking','Рейтинг']].map(([view,label])=>`<button id="results-tab-${view}" role="tab" type="button" data-action="results-view" data-view="${view}" aria-selected="${selected===view}" aria-controls="results-panel" tabindex="${selected===view?0:-1}" class="${selected===view?'selected':''}">${label}${view==='pending'?pendingReviewBadge():''}</button>`).join('')}</div>`;}
 function resultsTable(){
@@ -374,7 +366,7 @@ function bankScreen(){const p=paginate('bank',bank);return head('Банк пит
 function analyticsScreen(){const a=analytics||{},header=head('Аналітика','Дані спільного сервера.','<button data-action="nav" data-page="more">← Назад</button>')+sharedFilterBar('analytics');if(!analytics)return header+`<div class="notice${loadAnalytics.error?' warn':''}" role="status">${e(loadAnalytics.flight?'Завантажуємо аналітику…':loadAnalytics.error||'Оновіть дані, щоб завантажити аналітику.')}</div>`;return header+`<div class="cards">${stat('Проходжень',a.attempts??0)}${stat('Середній бал',String(a.average??0)+'%')}${stat('Склали',String(a.passRate??0)+'%')}${stat('Груп',a.groups?.length??0)}</div><div class="table-wrap" tabindex="0" role="region" aria-label="Таблиця з горизонтальним прокручуванням"><table><thead><tr><th>ГРУПА</th><th>ПРОХОДЖЕНЬ</th><th>СЕРЕДНІЙ БАЛ</th><th>СКЛАЛИ</th></tr></thead><tbody>${(a.groups??[]).map(g=>`<tr><td>${e(g.name)}</td><td>${g.attempts??0}</td><td>${g.average??0}%</td><td>${g.passed??0}</td></tr>`).join('')}</tbody></table></div><section class="panel" style="margin-top:20px"><h2>Питання, які варто повторити з групою</h2><p>Відсоток помилок за надісланими відповідями. Ураховано вибрану групу й тест.</p>${(a.hardestQuestions||[]).map(q=>`<div class="question-stat"><strong>${e(q.text)}</strong><small>${e(q.testTitle)} · #${e(q.testId)}</small><p>Помилок: ${q.attempts-q.correct} із ${q.attempts} · ${100-q.percent}%</p><progress max="100" value="${100-q.percent}" aria-label="Відсоток помилок"></progress></div>`).join('')||'<p>Ще немає детальних відповідей для цього вибору.</p>'}</section>`;}
 function auditScreen(){const p=paginate('audit',audit);return head('Журнал дій','Історія змін, зроблених інструкторами.','<button data-action="nav" data-page="more">← Назад</button>')+`<div class="table-wrap" tabindex="0" role="region" aria-label="Таблиця з горизонтальним прокручуванням"><table><thead><tr><th>ДАТА</th><th>ІНСТРУКТОР</th><th>ДІЯ</th><th>ОБ’ЄКТ</th><th>ДЕТАЛІ</th></tr></thead><tbody>${p.items.map(r=>`<tr><td>${date(r.createdAt)}</td><td>${e(r.instructorName||r.actorName)}</td><td>${e(r.action)}</td><td>${e(r.targetName)}</td><td>${e(r.details)}</td></tr>`).join('')}</tbody></table></div>${p.controls}`;}
 let renderedPage='';
-function render(){if(!alive()||updateApplying)return;const active=document.activeElement,tabFocus=page===renderedPage&&active?.matches('.results-switch [role=tab]')?active.id:'',keep=page===renderedPage&&['filter','material-search','cadet-note'].includes(active?.id)&&!(active?.id==='cadet-note'&&cadetCard.saving)?{el:active,start:active.selectionStart,end:active.selectionEnd}:null;if(keep&&active.id==='filter')filter=active.value;document.body.classList.toggle('dark',S.theme==='dark');if(!user()){app.innerHTML=renderAuth();return;}if(page==='runner'){app.innerHTML=runner();tick();return;}if(page==='result'){app.innerHTML=resultScreen();return;}const fn={home:()=>unfinishedWork()+home()+(!instructor()?learning():''),tests,results,groups,cadets,'cadet-card':cadetCard.html,editor,preview:previewScreen,reviews:results,grading:gradingScreen,more,bank:bankScreen,analytics:analyticsScreen,audit:auditScreen,materials:materials.html}[page]||home;app.innerHTML=layout(fn());renderedPage=page;if(tabFocus)document.getElementById(tabFocus)?.focus({preventScroll:true});if(keep){const field=document.getElementById(keep.el.id);if(field){field.replaceWith(keep.el);keep.el.focus({preventScroll:true});keep.el.setSelectionRange(keep.start,keep.end);}}}
+function render(){if(!alive()||updateApplying)return;const active=document.activeElement,tabFocus=page===renderedPage&&active?.matches('.results-switch [role=tab]')?active.id:'',keep=page===renderedPage&&['filter','cadet-note'].includes(active?.id)&&!(active?.id==='cadet-note'&&cadetCard.saving)?{el:active,start:active.selectionStart,end:active.selectionEnd}:null;if(keep&&active.id==='filter')filter=active.value;document.body.classList.toggle('dark',S.theme==='dark');if(!user()){app.innerHTML=renderAuth();return;}if(page==='runner'){app.innerHTML=runner();tick();return;}if(page==='result'){app.innerHTML=resultScreen();return;}const fn={home:()=>unfinishedWork()+home(),tests,results,groups,cadets,'cadet-card':cadetCard.html,editor,preview:previewScreen,reviews:results,grading:gradingScreen,more,bank:bankScreen,analytics:analyticsScreen,audit:auditScreen}[page]||home;app.innerHTML=layout(fn());renderedPage=page;if(tabFocus)document.getElementById(tabFocus)?.focus({preventScroll:true});if(keep){const field=document.getElementById(keep.el.id);if(field){field.replaceWith(keep.el);keep.el.focus({preventScroll:true});keep.el.setSelectionRange(keep.start,keep.end);}}}
 async function refresh(force=false){
  if(updateApplying||!user()||page==='runner')return;
  // The token identifies the owner of the in-flight workspace request.
@@ -445,7 +437,7 @@ async function refresh(force=false){
   }
   if(S.session?.token!==session.token)return;
   if(instructor())void loadReviewQueue(true,true,force);
-  if(page==='materials'||(!instructor()&&page==='home'&&(force||a.materialCatalogRevision!==response?.revisions.materials))){await materials.refresh();if(response)a.materialCatalogRevision=response.revisions.materials;}
+
   if(page==='more'&&instructor())await loadInstructors();
   if(page==='cadet-card'&&instructor())await cadetCard.load();
   if(S.session?.token===session.token){if(refresh.manualToken!==session.token)await accountSync.sync(force);if(!instructor())await examSession.discover();}
@@ -488,7 +480,8 @@ async function authSubmit(form,localOnly=false){
 
 async function refreshResults(){return refresh(false);}
 async function navigate(next){
- if(!user()||!instructor()&&!['home','tests','materials','results','more'].includes(next))return;
+ if(next==='materials')next='home';
+ if(!user()||!instructor()&&!['home','tests','results','more'].includes(next))return;
  loadAnalytics.flight=null;
  menuOpen=false;const fromCard=page==='cadet-card'&&next==='cadets',origin=page==='grading'?grading?.origin:null;
  if(page==='editor'||page==='runner'||page==='grading')await persist();
@@ -503,7 +496,7 @@ async function navigate(next){
  if(!origin&&!fromCard)resetPage(next);render();
  if(next==='cadet-card'&&instructor())return cadetCard.load();
  if(next==='more'&&instructor())return loadInstructors();
- if(next==='materials')return materials.openList();
+
  if(next==='results')return pendingReviewsActive()?loadReviewQueue():refreshResults();
  if(next==='bank'){try{bank=(await rpc('GET','/api/instructor/question-bank')).questions||[];render();}catch(x){toast(x.message);}}
 }
@@ -710,7 +703,7 @@ function startFastTest(catalog,session,a){
    if(a.run.examProtocol===1&&!examSession.owned(a.run))return resumeRun();
    page='runner';render();
    if(a.run.test.mode==='exam')document.documentElement.requestFullscreen?.().catch(()=>{});
-  })().finally(()=>{flight=null;});return flight;
+  })().catch(x=>{if(x.code==='NETWORK')x.message='Для початку тесту підключіться до інтернету та дочекайтеся відкриття інструктором.';throw x;}).finally(()=>{flight=null;});return flight;
  },'Почати');
 }
 async function start(testId){
@@ -796,7 +789,7 @@ async function backgroundTick(){
    if(account().run?.examProtocol===1)return;
   }
   await accountSync.sync();if(!idle())return;
-  await materials.syncProgress();if(!idle())return;
+
   await publicTableSync.tick();
  }finally{backgroundSyncing=false;}
 }
@@ -876,7 +869,7 @@ async function clickAction(button){
  if(act==='list-page'){listPages[button.dataset.list]=+button.dataset.index;render();document.querySelector('.main')?.scrollTo(0,0);return;}
  const a=account();
  if(page==='runner'&&a.run?.examProtocol===1&&!examSession.editable(a.run)&&['question','prev','next','unanswered','finish','handoff-exam'].includes(act))return;
- if(await materials.action(act,tid))return;
+
  if(act==='cadet-card'){if(!instructor())return;a.openCadetId=tid;return navigate('cadet-card');}
  if(act.startsWith('card-')&&await cadetCard.action(act,button))return;
  if(act==='grade-result')return openGrading(tid);
@@ -891,11 +884,11 @@ async function clickAction(button){
   const keepFocus=!!document.activeElement?.closest('.results-switch');a.resultsSearches??={};a.resultsSearches[resultsView()]=filter;
   a.resultsView=button.dataset.view;page='results';filter=a.resultsSearches[resultsView()]||'';await persist();render();
   if(keepFocus)$('#results-tab-'+resultsView())?.focus({preventScroll:true});
-  return pendingReviewsActive()?loadReviewQueue(false,false,true):refreshResults();
+  return pendingReviewsActive()?loadReviewQueue():refreshResults();
  }
  if(act==='review-recovery')return openExamRecovery(tid);
  if(act==='refresh'||act==='sync-account')return updateData();
- if(act==='toggle-material-filters'){const focused=document.activeElement===button;a.materialFiltersOpen=!a.materialFiltersOpen;scheduleSave();render();if(focused)$('[data-action="toggle-material-filters"]')?.focus({preventScroll:true});return;}
+
  if(act==='reset-filters'){Object.assign(sharedFilters(page),{groupId:'',testId:''});delete sharedTestSearches.get(a)?.[page];if(['tests','cadets'].includes(page)){filter='';a.sectionSearches??={};a.sectionSearches[page]='';}resetPage(page);if(page==='results')resetPage('ranking');await persist();if(page==='analytics')await loadAnalytics();render();return;}
  if(act==='toggle-archive'){a.showArchived=!a.showArchived;resetPage('groups');await persist();render();return;}
  if(act==='bulk-assign'){await bulkAssignment();return;}
@@ -916,7 +909,7 @@ async function clickAction(button){
  if(act==='sync'){await syncQueue(true);toast(a.pending.length?'Результати залишаються у черзі.':'Чергу надіслано.');return;}
  if(act==='logout'){
   await persist();await syncQueue(true);await accountSync.sync(true);
-  const leave=async()=>{void reviewPresence.stop();await materials.close();await persist();if(typeof secureStorage!=='undefined'&&secureStorage.enabled){await secureStorage.collect().catch(()=>{});try{await secureStorage.lock();}catch(error){if(!secureStorage.status().locked)throw error;toast(error.message);}S.accounts={};checkpoint=null;}S.session=null;resetSessionViews();accountSync.reset();examSession.reset();page='home';lastError='';try{await persist();}finally{render();}};
+  const leave=async()=>{void reviewPresence.stop();modal.close();await persist();if(typeof secureStorage!=='undefined'&&secureStorage.enabled){await secureStorage.collect().catch(()=>{});try{await secureStorage.lock();}catch(error){if(!secureStorage.status().locked)throw error;toast(error.message);}S.accounts={};checkpoint=null;}S.session=null;resetSessionViews();accountSync.reset();examSession.reset();page='home';lastError='';try{await persist();}finally{render();}};
   const cloud=accountSync.status();if(cloud.pending||cloud.conflicts.length||account().pending.length||(!instructor()&&examSession.status().pending))return confirmAction('Зміни ще не надіслані','На іншому ПК ці зміни з’являться після синхронізації. Локальна копія залишиться тут. Вийти зараз?',leave,'Вийти');await leave();return;
  }
  if(act==='new-test'){if(a.draft){page='editor';toast('Відкрито вашу незавершену чернетку.');}else{a.draft=C.newDraft();await persist();page='editor';}render();return;}
@@ -1056,7 +1049,7 @@ window.addEventListener('pagehide',()=>{if(diskStateLoaded&&alive()&&!updateAppl
 window.addEventListener('pagehide',()=>hostWindow.close());
 window.addEventListener('pageshow',event=>{if(event.persisted&&alive()&&!updateApplying)hostWindow.open().catch(()=>{});});
 const updater=createUpdater({local,
- canApply:()=>user()&&account().run?'Оновлення готове. Установимо його автоматично після завершення поточного тесту.':working||refreshing||syncing||updateData.flight||exportResultsXlsx.flight||downloadIntakeArchive.flights?.size||intakeRunning||rpcFlights||modal.open||materials.busy?'Оновлення готове. Чекаємо завершення поточної дії…':'',
+ canApply:()=>user()&&account().run?'Оновлення готове. Установимо його автоматично після завершення поточного тесту.':working||refreshing||syncing||updateData.flight||exportResultsXlsx.flight||downloadIntakeArchive.flights?.size||intakeRunning||rpcFlights||modal.open?'Оновлення готове. Чекаємо завершення поточної дії…':'',
  save:async release=>{clearTimeout(saveTimer);S.updateReturnPage='more';S.updateTargetCode=release.code;await journalSaving.catch(()=>{});if(checkpoint){const r=secureStorage.enabled?await secureStorage.saveJournal(checkpoint):await local('/journal',checkpoint);if(r.ok===false)throw Error(r.error||'Не вдалося зберегти дані на диску.');}await persist();},
  freeze:(active,message)=>{updateApplying=active;if(active){modal.close();app.innerHTML=`<div class="boot" role="status">Оновлення застосунку<small>${e(message)}</small></div>`;}else{delete S.updateReturnPage;delete S.updateTargetCode;render();}},
  info:value=>{updateInfo=value;const label=$('#update-message');if(label)label.textContent=value.message;const button=$('button[data-action="check-update"]');if(button)button.disabled=updater.requested||updater.applying;},
@@ -1080,7 +1073,7 @@ async function init(){
 init();
 export {account,refresh,persist,syncQueue,finishRun,recoverRun,navigate,clickAction,uptime,authSubmit};
 
-document.addEventListener('change',event=>{const el=event.target;if(user()&&page==='editor'&&el.dataset.questionType!==undefined){const q=account().draft.questions[+el.dataset.questionType];q.type=el.value;if(q.type==='choice'&&q.answers.length<2)q.answers=C.blankQuestion().answers;const d=account().draft;d.localRevision=(d.localRevision||0)+1;journal({kind:'draft',userId:id(user().id),localId:d.localId,revision:d.localRevision,patch:{scope:'question-replace',q:+el.dataset.questionType,value:structuredClone(q)}});scheduleSave();render();return;}if(!user()||!['tests','cadets','results','materials','analytics'].includes(page)||!['shared-group','shared-test'].includes(el.id))return;const scope=page,token=S.session.token,f=sharedFilters(scope);f[el.id==='shared-group'?'groupId':'testId']=el.value;resetPage(scope);if(scope==='results')resetPage('ranking');persist().then(async()=>{if(page!==scope||S.session?.token!==token)return;if(scope==='analytics')await loadAnalytics();if(page!==scope||S.session?.token!==token)return;render();if(scope==='results')refresh(false);}).catch(x=>toast(x.message));});
+document.addEventListener('change',event=>{const el=event.target;if(user()&&page==='editor'&&el.dataset.questionType!==undefined){const q=account().draft.questions[+el.dataset.questionType];q.type=el.value;if(q.type==='choice'&&q.answers.length<2)q.answers=C.blankQuestion().answers;const d=account().draft;d.localRevision=(d.localRevision||0)+1;journal({kind:'draft',userId:id(user().id),localId:d.localId,revision:d.localRevision,patch:{scope:'question-replace',q:+el.dataset.questionType,value:structuredClone(q)}});scheduleSave();render();return;}if(!user()||!['tests','cadets','results','analytics'].includes(page)||!['shared-group','shared-test'].includes(el.id))return;const scope=page,token=S.session.token,f=sharedFilters(scope);f[el.id==='shared-group'?'groupId':'testId']=el.value;resetPage(scope);if(scope==='results')resetPage('ranking');persist().then(async()=>{if(page!==scope||S.session?.token!==token)return;if(scope==='analytics')await loadAnalytics();if(page!==scope||S.session?.token!==token)return;render();if(scope==='results')refresh(false);}).catch(x=>toast(x.message));});
 
 document.addEventListener('focusin',event=>{if(!user())return;const el=event.target;if(page==='editor'&&account().draft&&el.closest('.question')){const cards=[...document.querySelectorAll('.question')];account().draft.resumeQuestion=cards.indexOf(el.closest('.question'));scheduleSave();}else if(page==='grading'&&grading&&el.dataset.grade){grading.draft.resumeQuestion=el.dataset.grade;scheduleSave();}});
 
@@ -1120,18 +1113,34 @@ async function openExamRecovery(recoveryId){
 async function loadReviewQueue(quiet=false,background=false,force=false){
  const token=S.session?.token;if(!token||!instructor()||(quiet&&!background&&!pendingReviewsPage()))return;
  if(background&&!force&&reviewQueueToken===token&&Date.now()-reviewQueueUpdatedAt<30000)return;
- if(reviewQueueFlight?.token===token)return reviewQueueFlight.promise;
- const flight={token,promise:null};reviewQueueFlight=flight;
+ if(reviewQueueFlight?.token===token){
+  const current=reviewQueueFlight;
+  if(force&&current.conditional)return current.forced??=(current.promise.catch(()=>{}).then(()=>{if(S.session?.token===token)return loadReviewQueue(quiet,background,true);}));
+  return current.promise;
+ }
+ const flight={token,promise:null,conditional:false};reviewQueueFlight=flight;
  const resultVersion=account().resultWriteVersion||0;
  flight.promise=(async()=>{const sentAt=performance.now();try{
-  const r=await rpc('GET','/api/instructor/reviews',{},token);if(S.session?.token!==token)return;
-  let extra;try{extra=await rpc('GET','/api/instructor/exam-recoveries',{},token);}catch(x){if(x.code!=='NOT_FOUND')throw x;extra={recoveries:[]};}
+  const known=!force&&reviewQueueToken===token&&Date.now()-reviewQueueFullAt<300000&&typeof reviewQueueRevision==='string'?reviewQueueRevision:null;
+  flight.conditional=known!==null;
+  const r=await rpc('GET','/api/instructor/reviews',{reviewQueueProtocol:2,includeRecoveries:true,...(known===null?{}:{knownResultsRevision:known})},token);if(S.session?.token!==token)return;
+  let extra;
+  if(r.reviewQueueProtocol===2){
+   if(r.unchanged===true){
+    if(known===null||r.resultsRevision!==known||!Array.isArray(r.sessions)||!Number.isFinite(r.serverNow))throw Error('Некоректний стан перевірок.');
+   }else if(!Array.isArray(r.results)||!Array.isArray(r.recoveries))throw Error('Некоректний список перевірок.');
+   extra={recoveries:r.recoveries};
+  }else{try{extra=await rpc('GET','/api/instructor/exam-recoveries',{},token);}catch(x){if(x.code!=='NOT_FOUND')throw x;extra={recoveries:[]};}}
   if(S.session?.token!==token)return;
   if((account().resultWriteVersion||0)!==resultVersion){
    setTimeout(()=>{if(S.session?.token===token)void loadReviewQueue(true,true,true);},0);
    return;
   }
-  reviewQueue=r.results||[];reviewQueueAt=sentAt;reviewQueueRevision=r.resultsRevision??null;reviewQueueError='';examRecoveryQueue=extra.recoveries||[];reviewQueueToken=token;reviewQueueUpdatedAt=Date.now();updateReviewCount();if(pendingReviewsPage())render();
+  if(r.reviewQueueProtocol===2&&r.unchanged===true){
+   const sessions=new Map(r.sessions.map(v=>[String(v.resultId),v]));
+   for(const row of reviewQueue)row.reviewPresence=sessions.get(String(row.id))||{state:'free',serverNow:r.serverNow};
+  }else{reviewQueue=r.results||[];examRecoveryQueue=extra.recoveries||[];reviewQueueFullAt=Date.now();}
+  reviewQueueAt=sentAt;reviewQueueRevision=r.resultsRevision??null;reviewQueueError='';reviewQueueToken=token;reviewQueueUpdatedAt=Date.now();updateReviewCount();if(pendingReviewsPage())render();
  }catch(x){if(S.session?.token!==token)return;reviewQueueError='Не вдалося оновити список. Поточний статус перевірок не підтверджено.';updateReviewCount();if(pendingReviewsPage())render();if(!quiet)throw x;
  }finally{if(reviewQueueFlight===flight)reviewQueueFlight=null;}})();return flight.promise;
 }

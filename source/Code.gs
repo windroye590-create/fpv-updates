@@ -20,8 +20,8 @@ const PUBLIC_SYNC_RETRY = 'LK_PUBLIC_SYNC_RETRY_V1';
 const PUBLIC_SYNC_DELAY_MS = 30000;
 const REVIEW_LEASE_MS = 120000;
 const REVIEW_LEASE_PREFIX = 'LK_REVIEW_SESSION_V1_';
-const LATEST_APP_VERSION_CODE = 7;
-const LATEST_APP_VERSION_NAME = '1.0.6';
+const LATEST_APP_VERSION_CODE = 8;
+const LATEST_APP_VERSION_NAME = '1.0.7';
 const APP_DOWNLOAD_URL_PROPERTY = 'PC_DOWNLOAD_URL';
 const ROLE_INSTRUCTOR = 'instructor';
 const ROLE_CADET = 'cadet';
@@ -112,6 +112,8 @@ var publicResultsSpreadsheetCache_ = null;
 var publicResultsSheetCache_ = null;
 var publicLayouts_ = [];
 var resultSeriesCache_ = null;
+var resultLookupCache_ = null;
+var testQuestionRequestCache_ = null;
 var testAccessCache_ = null;
 var testAccessGroupsCache_ = null;
 var publicSyncActor_ = null;
@@ -135,6 +137,9 @@ function doGet() {
     publicTableSync: true,
     fastTestStart: true,
     deferredResultStats: true,
+    cadetCriticalPath: true,
+    cadetGoogleOptimization: true,
+    conditionalReviewQueue: true,
     testAccess: true,
     newIntake: true,
     reviewPresence: true,
@@ -199,6 +204,8 @@ function setAppDownloadUrl(url, versionCode, versionName) {
 
 function doPost(e) {
   resultSeriesCache_ = null;
+  resultLookupCache_ = null;
+  testQuestionRequestCache_ = null;
   workspaceMutation_ = null; workspaceWriteRequest_ = false;
   deferPublicSync_ = false;
   deletedRetakeRequest_ = false; deletedRetakeEpochs_ = null;
@@ -212,11 +219,13 @@ function doPost(e) {
     if (raw.length > MAX_API_REQUEST_JSON_LENGTH) fail_('Запит перевищує дозволений розмір.', 'PAYLOAD_TOO_LARGE');
     var request = JSON.parse(raw);
     deletedRetakeRequest_ = Boolean(request && request.retakeProtocol === 1);
-    // Acknowledging answers must not wait for the separately published report.
+    // Attempt traffic must not wait for the separately published report.
     // Older clients retain their original immediate-publication behavior.
     deferPublicSync_ = request && request.deliveryProtocol === 1 && request.action === 'api'
-      && String(request.method).toUpperCase() === 'POST'
-      && (request.path === '/api/results' || /^\/api\/exam-session\//.test(String(request.path)) || /^\/api\/tests\/[^/]+\/start$/.test(String(request.path)));
+      && (String(request.method).toUpperCase() === 'POST'
+        && (request.path === '/api/results' || /^\/api\/exam-session\//.test(String(request.path)) || /^\/api\/tests\/[^/]+\/start$/.test(String(request.path))
+          || request.path === '/api/account-state/document' && request.body && request.body.key === 'training')
+        || String(request.method).toUpperCase() === 'GET' && request.path === '/api/exam-session');
     var mutation = requiresWriteLock_(request);
     if (mutation) {
       lock = LockService.getScriptLock();
@@ -241,8 +250,16 @@ function doPost(e) {
       // A bounded worker runs only after authentication and a successful API
       // operation. It uses the same script lock as result/grade mutations.
       try {
-        if (!deferPublicSync_) drainPublicResults_(Boolean(lock), 2);
-        response.publicTableSync = publicSyncStatus_(publicSyncActor_);
+        if (!deferPublicSync_) {
+          drainPublicResults_(Boolean(lock), 2);
+          response.publicTableSync = publicSyncStatus_(publicSyncActor_);
+        } else {
+          // Starting/saving an attempt must not scan every result and account
+          // just to update a report badge. A committed result carries its own
+          // durable publication flag; the next authenticated poll counts it.
+          var publication = response.completion || response;
+          if (publication.tableSynced === false) response.tableSynced = false;
+        }
       } catch (syncError) {
         response.publicTableSync = {protocol:1,state:'pending',pendingCount:1,retryAfterSeconds:30};
         console.warn('Стан синхронізації таблиці: '+String(syncError.message||syncError));
@@ -545,7 +562,7 @@ function workspaceRevisions_(user,all) {
 function conditionalWorkspace_(user,body) {
   var all=body.allResults===true,known=body.known||{},before=workspaceRevisions_(user,all),props=PropertiesService.getScriptProperties();
   var busy=props.getProperty('LK_WORKSPACE_WRITE'),changes={},out={workspaceProtocol:1,user:publicUser_(user),revisions:before,changes:changes,
-    capabilities:{fastTestStart:true,deferredResultStats:true,singleAttempt:true,deletedAttemptRetakes:true,resultDeletion:user.role===ROLE_INSTRUCTOR,privateLocalStorage:true,trainingResume:true,testAccess:true,newIntake:true,reviewPresence:true,chunkedTests:true,examRecovery:true,testDeletion:true,multipleChoice:true,examResume:true,pcAccountSync:true,writtenTests:true,conditionalWorkspace:true,listPerformance:true,materials:true,groupArchive:true,bulkAssignment:true,filteredAnalytics:true,cadetTransfer:true,cadetCard:true,formattedReports:true,intakeArchives:true},resultScope:all?'all':'recent',intakeGeneration:props.getProperty('LK_INTAKE_GENERATION')||'0'};
+    capabilities:{fastTestStart:true,deferredResultStats:true,cadetCriticalPath:true,singleAttempt:true,deletedAttemptRetakes:true,resultDeletion:user.role===ROLE_INSTRUCTOR,privateLocalStorage:true,trainingResume:true,testAccess:true,newIntake:true,reviewPresence:true,chunkedTests:true,examRecovery:true,testDeletion:true,multipleChoice:true,examResume:true,pcAccountSync:true,writtenTests:true,conditionalWorkspace:true,listPerformance:true,materials:true,groupArchive:true,bulkAssignment:true,filteredAnalytics:true,cadetTransfer:true,cadetCard:true,formattedReports:true,intakeArchives:true},resultScope:all?'all':'recent',intakeGeneration:props.getProperty('LK_INTAKE_GENERATION')||'0'};
   if(user.role===ROLE_INSTRUCTOR)out.intake=intakeStatus_();
   if(known.groups!==before.groups)changes.groups=listGroups_();
   if(known.tests!==before.tests)changes.tests=listTestsForUser_(user);
@@ -636,7 +653,7 @@ function routeApi_(request) {
   var cadetCardMatch=path.match(/^\/api\/instructor\/cadets\/([^/]+)(\/notes)?$/);
   if(cadetCardMatch){
     var cadetId=decodePart_(cadetCardMatch[1]);
-    if(method==='GET'&&!cadetCardMatch[2])return instructorCadetCard_(cadetId);
+    if(method==='GET'&&!cadetCardMatch[2])return instructorCadetCard_(cadetId,body);
     if(method==='POST'&&cadetCardMatch[2])return addCadetNote_(user,cadetId,body);
   }
 
@@ -1791,13 +1808,29 @@ function testFromRow_(row, index, includeQuestions) {
 }
 
 function getTestById_(id) {
+  var sheet=sheet_('tests'),revision=PropertiesService.getScriptProperties().getProperty('LK_REV_tests')||'0';
+  var key='LK_TEST_ROW_V1_'+sha256Hex_(String(id)),hint=null;
+  try{hint=JSON.parse(CacheService.getScriptCache().get(key)||'null');}catch(ignored){}
+  if(hint&&hint.revision===revision&&Number.isInteger(hint.row)&&hint.row>=2&&hint.row<=sheet.getLastRow()
+    &&typeof hint.canonical==='string'&&typeof hint.replaces==='string'){
+    var row=sheet.getRange(hint.row,1,1,HEADERS.tests.length).getValues()[0];
+    var current=testFromRow_(row,hint.row-2,false);
+    // The cache locates a row only. Current questions, publication, assignment
+    // and access checks always come from this request's live Sheets data.
+    if(String(current.id)===String(id)&&String(current.replacesId||'')===hint.replaces){
+      current.canonicalTestId=hint.canonical;current.questions=parseQuestions_(row[7],current.id);current.questionCount=current.questions.length;return current;
+    }
+  }
   var metadata = listTests_(false).filter(function (test) {
     return String(test.id) === String(id);
   })[0];
   if (!metadata) return null;
-  metadata.questions = parseQuestions_(sheet_('tests').getRange(metadata.rowNumber, 8).getValue(), metadata.id);
-  metadata.questionCount = metadata.questions.length;
-  return metadata;
+  var row=sheet.getRange(metadata.rowNumber,1,1,HEADERS.tests.length).getValues()[0];
+  var current=testFromRow_(row,metadata.rowNumber-2,false);
+  if(String(current.id)!==String(id)||String(current.replacesId||'')!==String(metadata.replacesId||''))fail_('Каталог тестів зараз оновлюється. Повторіть запит.','BUSY');
+  current.canonicalTestId=metadata.canonicalTestId;current.questions=parseQuestions_(row[7],current.id);current.questionCount=current.questions.length;
+  try{CacheService.getScriptCache().put(key,JSON.stringify({revision:revision,row:current.rowNumber,canonical:current.canonicalTestId,replaces:String(current.replacesId||'')}),21600);}catch(ignored){}
+  return current;
 }
 
 function isRetakeTest_(test) { return String(test && test.description || '').indexOf(RETRY_PREFIX) >= 0; }
@@ -1975,6 +2008,8 @@ function storeTestQuestions_(id, raw) {
 }
 
 function readTestQuestions_(value, id) {
+  var memo=deferPublicSync_&&workspaceWriteRequest_,cacheKey=memo?JSON.stringify([id==null?'':String(id),String(value)]):'';
+  if(memo&&testQuestionRequestCache_&&testQuestionRequestCache_.key===cacheKey)return JSON.parse(testQuestionRequestCache_.raw);
   var broken = function () { fail_('Не вдалося завантажити всі питання тесту. Оновіть дані або зверніться до інструктора.', 'TEST_DATA_INCOMPLETE'); };
   var marker;
   try { marker = JSON.parse(String(value).slice(TEST_PARTS_PREFIX.length)); } catch (error) { broken(); }
@@ -2007,6 +2042,9 @@ function readTestQuestions_(value, id) {
   var questions;
   try { questions = JSON.parse(raw); } catch (error) { broken(); }
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 200) broken();
+  // Immutable parts are verified once per locked request. Each caller gets a
+  // separate object; answer edits/shuffling cannot mutate the grading source.
+  if(memo)testQuestionRequestCache_={key:cacheKey,raw:raw};
   return questions;
 }
 
@@ -2021,7 +2059,8 @@ function parseQuestions_(value, id) {
 }
 
 function sanitizeTestForCadet_(test) {
-  var clean = copyObject_(test);
+  var metadata={};Object.keys(test).forEach(function(key){if(key!=='questions')metadata[key]=test[key];});
+  var clean = copyObject_(metadata);
   clean.questions = (test.questions || []).map(function (question) {
     return {
       id: question.id,
@@ -2150,6 +2189,7 @@ function submitResult_(user, body, examSource, recoveryApproval) {
     JSON.stringify(selected), result.examExitCount, result.examPinned, result.gradingStatus, result.earnedPoints, result.maxPoints, result.choiceTotal, result.pendingWritten, 0, '{}', result.examRecovered, safeCellText_(result.recoveredBy), result.recoveredAt,'pending'
   ]);
   var committedRow=sheet_('results').getLastRow();
+  resultLookupCache_=null;
   invalidatePublicSync_();
   // The result is committed. Failures in auxiliary sheets must not turn an
   // accepted attempt into an apparent failure or cause a duplicate submission.
@@ -2286,6 +2326,18 @@ function listResults_(userId) {
   }).map(resultFromRow_).sort(function (first, second) {
     return dateMillis_(second.completedAt) - dateMillis_(first.completedAt);
   });
+}
+
+function listPendingReviewResults_() {
+  var sheet=sheet_('results'),count=Math.max(0,sheet.getLastRow()-1);
+  if(count<=DASHBOARD_RESULT_LIMIT)return listResults_(null).filter(function(r){return r.gradingStatus==='pending_review';});
+  // Old graded history is irrelevant to the review queue. Probe one narrow
+  // status column, then read one contiguous span covering pending work.
+  var states=sheet.getRange(2,17,count,1).getValues(),first=-1,last=-1;
+  states.forEach(function(row,i){if(row[0]==='pending_review'){if(first<0)first=i;last=i;}});
+  if(first<0)return [];
+  return readResultSummaries_(sheet,first+2,last-first+1).filter(function(row){return row[0]!==''&&row[16]==='pending_review';})
+    .map(resultFromRow_).sort(function(a,b){return dateMillis_(b.completedAt)-dateMillis_(a.completedAt);});
 }
 
 // List views never need the large answers JSON or the submission key.
@@ -2489,13 +2541,41 @@ function findResult_(userId, testId) {
 }
 
 function findResultRecord_(userId, testId) {
+  // This memo is valid only while this request owns the mutation lock. In
+  // particular a negative lookup must never survive another PC's submission.
+  var memo=deferPublicSync_&&workspaceWriteRequest_,key=JSON.stringify([String(userId),String(testId)]);
+  if(memo&&resultLookupCache_&&Object.prototype.hasOwnProperty.call(resultLookupCache_,key))return resultLookupCache_[key];
+  var record=readResultRecord_(userId,testId);
+  if(memo){if(!resultLookupCache_)resultLookupCache_=Object.create(null);resultLookupCache_[key]=record;}
+  return record;
+}
+function readResultRecord_(userId, testId) {
   var sheet = sheet_('results');
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
+  // Sheets searches the ID column on its server. A new cadet need not download
+  // everybody's names/groups and test IDs to prove they have no result yet.
+  if(lastRow>500){
+    var finder=sheet.getRange(2,2,lastRow-1,1).createTextFinder(String(userId));
+    var matches=finder.matchEntireCell(true).matchCase(true).useRegularExpression(false).findAll()
+      .map(function(range){return range.getRow();}).sort(function(a,b){return b-a;});
+    if(!matches.length)return null;
+    var tests=matches.length>1?sheet.getRange(matches[matches.length-1],5,matches[0]-matches[matches.length-1]+1,1).getValues():null;
+    for(var i=0;i<matches.length;i++){
+      if(tests&&String(tests[matches[i]-matches[matches.length-1]][0])!==String(testId))continue;
+      var matched=sheet.getRange(matches[i],1,1,HEADERS.results.length).getValues()[0];
+      // A concurrent read-only request can overlap row deletion. Refuse a
+      // shifted row instead of returning another cadet's work.
+      if(String(matched[1])!==String(userId))fail_('Результати зараз оновлюються. Повторіть запит.','BUSY');
+      if(String(matched[4])===String(testId))return {result:resultFromRow_(matched),row:matched,rowNumber:matches[i]};
+    }
+    return null;
+  }
   var keys = sheet.getRange(2, 2, lastRow - 1, 4).getValues();
   for (var index = keys.length - 1; index >= 0; index -= 1) {
     if (String(keys[index][0]) === String(userId) && String(keys[index][3]) === String(testId)) {
       var row = sheet.getRange(index + 2, 1, 1, HEADERS.results.length).getValues()[0];
+      if(String(row[1])!==String(userId)||String(row[4])!==String(testId))fail_('Результати зараз оновлюються. Повторіть запит.','BUSY');
       return {result: resultFromRow_(row), row: row,rowNumber:index+2};
     }
   }
@@ -3361,16 +3441,19 @@ function cadetNoteFromRow_(row) {
   var data=JSON.parse(String(row[3]||'{}'));
   return {id:String(row[1]),cadetId:String(row[0]),authorId:String(row[2]),authorName:String(data.authorName||''),text:String(data.text||''),createdAt:iso_(row[4])};
 }
-function instructorCadetCard_(id) {
-  var cadet=requireCardCadet_(id),uid=String(cadet.id),groups=listGroups_(),progress=Object.create(null),visited=Object.create(null);
-  dataRows_('materialProgress').forEach(function(row){
-    if(String(row[2])!==uid)return;
-    visited[String(row[0])]=true;var key=String(row[0])+':'+String(row[1]);
-    progress[key]={revision:Number(row[1]),lastPage:Number(row[3]),maxPage:Number(row[4]),pageCount:Number(row[5]),openedAt:iso_(row[6]),updatedAt:iso_(row[7])};
-  });
-  var materials=materialRows_().filter(function(item){return canReadMaterial_(item,cadet,groups)||visited[item.id];}).map(function(item){
-    return {material:publicMaterial_(item),assigned:canReadMaterial_(item,cadet,groups),progress:progress[item.id+':'+item.revision]||null};
-  });
+function instructorCadetCard_(id,options) {
+  var cadet=requireCardCadet_(id),uid=String(cadet.id),materials=[];
+  if(!options||options.includeMaterials!==false){
+    var groups=listGroups_(),progress=Object.create(null),visited=Object.create(null);
+    dataRows_('materialProgress').forEach(function(row){
+      if(String(row[2])!==uid)return;
+      visited[String(row[0])]=true;var key=String(row[0])+':'+String(row[1]);
+      progress[key]={revision:Number(row[1]),lastPage:Number(row[3]),maxPage:Number(row[4]),pageCount:Number(row[5]),openedAt:iso_(row[6]),updatedAt:iso_(row[7])};
+    });
+    materials=materialRows_().filter(function(item){return canReadMaterial_(item,cadet,groups)||visited[item.id];}).map(function(item){
+      return {material:publicMaterial_(item),assigned:canReadMaterial_(item,cadet,groups),progress:progress[item.id+':'+item.revision]||null};
+    });
+  }
   return {cadetCardProtocol:1,cadet:publicUser_(cadet),results:listResults_(uid),tests:listTestsForUser_(cadet),materials:materials,
     recoveries:listExamRecoveries_(cadet,true),notes:dataRows_('cadetNotes').filter(function(row){return String(row[0])===uid;}).map(cadetNoteFromRow_).reverse(),updatedAt:new Date().toISOString()};
 }
@@ -3651,14 +3734,26 @@ function reviewQueueWithPresence_(user, body) {
   var now = Date.now(), properties = PropertiesService.getScriptProperties();
   var all = properties.getProperties();
   var lookup = {getProperty:function(key){return all[key] || null;}};
-  var results = listResults_(null).filter(function(r){return r.gradingStatus === 'pending_review' && (!body.groupName || r.groupName === body.groupName) && (!body.testId || String(r.testId) === String(body.testId));});
+  var optimized=body.reviewQueueProtocol===2,revision=String(all.LK_REV_results||'0');
+  if(optimized&&!body.groupName&&!body.testId&&typeof body.knownResultsRevision==='string'&&body.knownResultsRevision===revision&&!all.LK_WORKSPACE_WRITE){
+    var sessions=[];
+    Object.keys(all).forEach(function(key){if(key.indexOf(REVIEW_LEASE_PREFIX)===0){
+      var id=decodeURIComponent(key.slice(REVIEW_LEASE_PREFIX.length)),lease=readReviewLease_(id,now,lookup);
+      if(lease)sessions.push(publicReviewLease_(id,lease,user,'',now));
+    }});
+    if(!properties.getProperty('LK_WORKSPACE_WRITE')&&revision===String(properties.getProperty('LK_REV_results')||'0'))
+      return {reviewQueueProtocol:2,unchanged:true,sessions:sessions,serverNow:now,resultsRevision:revision};
+  }
+  var results = listPendingReviewResults_().filter(function(r){return (!body.groupName || r.groupName === body.groupName) && (!body.testId || String(r.testId) === String(body.testId));});
   results.forEach(function(result){
     var lease = readReviewLease_(result.id, now, lookup);
     // Queue readers never receive the private lease credential.
     result.reviewPresence = publicReviewLease_(result.id, lease, user, '', now);
   });
-  var stable = !all.LK_WORKSPACE_WRITE && !properties.getProperty('LK_WORKSPACE_WRITE') && String(all.LK_REV_results || '0') === String(properties.getProperty('LK_REV_results') || '0');
-  return {results:results, reviewPresence:true, serverNow:now, resultsRevision:stable ? String(all.LK_REV_results || '0') : null};
+  var out={results:results,reviewPresence:true,serverNow:now};
+  if(optimized){out.reviewQueueProtocol=2;out.unchanged=false;if(body.includeRecoveries===true)out.recoveries=listExamRecoveries_(user,true);}
+  var stable = !all.LK_WORKSPACE_WRITE && !properties.getProperty('LK_WORKSPACE_WRITE') && revision === String(properties.getProperty('LK_REV_results') || '0');
+  out.resultsRevision=stable?revision:null;return out;
 }
 function reviewPresenceSnapshot_(user) {
   var properties=PropertiesService.getScriptProperties(),all=properties.getProperties(),now=Date.now(),sessions=[];
@@ -3801,10 +3896,27 @@ function pcStateKey_(user, value) {
   if(user.role===ROLE_CADET&&key==='training')return key;
   fail_('Цей тип чернетки недоступний для облікового запису.','FORBIDDEN');
 }
-function pcStateHeaders_(user) {
+function pcStateMetadata_(user) {
   var sheet=sheet_('pcState'),count=sheet.getLastRow()-1;
   if(count<1)return [];
-  return sheet.getRange(2,1,count,9).getValues().map(function(row,i){return {row:row,number:i+2};})
+  if(user&&count>500){
+    var matches=sheet.getRange(2,1,count,1).createTextFinder(String(user.id))
+      .matchEntireCell(true).matchCase(true).useRegularExpression(false).findAll()
+      .map(function(range){return range.getRow();}).sort(function(a,b){return a-b;});
+    // Preserve physical row offsets, including gaps belonging to other users.
+    // The locked writer can append/trim this sparse snapshot without another
+    // full-table read. No payload from another account is needed.
+    var metadata=[];metadata.length=count;
+    if(matches.length){
+      var first=matches[0],last=matches[matches.length-1];
+      sheet.getRange(first,1,last-first+1,9).getValues().forEach(function(row,index){if(String(row[0])===String(user.id))metadata[first-2+index]=row;});
+    }
+    return metadata;
+  }
+  return sheet.getRange(2,1,count,9).getValues();
+}
+function pcStateHeaders_(user,metadata) {
+  return (metadata||pcStateMetadata_(user)).map(function(row,i){return {row:row,number:i+2};})
     .filter(function(x){return String(x.row[0])===String(user.id)&&Number(x.row[4])===-1;});
 }
 function pcStateLatest_(headers,key) {
@@ -3873,11 +3985,14 @@ function pcStatePut_(user,body) {
   pcStateValidate_(user,key,body.value);
   return pcStateWrite_(user,key,body);
 }
-function pcStateWrite_(user,key,body) {
+function pcStateWrite_(user,key,body,observed) {
   var expected=body.expectedRevision,request=body.requestId;
   var raw=JSON.stringify(body.value);
   if(raw.length>MAX_PC_STATE_JSON_LENGTH)fail_('Чернетка завелика для синхронізації. Скоротіть її або експортуйте в JSON. Дані на цьому ПК збережено.','STATE_TOO_LARGE');
-  var digest=sha256Hex_(raw),headers=pcStateHeaders_(user),old=pcStateLatest_(headers,key),props=PropertiesService.getScriptProperties();
+  // Exam reads and writes share this snapshot only within the same locked
+  // request. No authorization or revision data is cached across requests.
+  var metadata=observed&&observed.rows||pcStateMetadata_(user);
+  var digest=sha256Hex_(raw),headers=pcStateHeaders_(user,metadata),old=pcStateLatest_(headers,key),props=PropertiesService.getScriptProperties();
   if(old&&String(old.row[7])===request){
     if(String(old.row[8])!==digest)fail_('Ключ синхронізації вже використано для інших даних.','REQUEST_CONFLICT');
     props.setProperty('LK_PC_STATE_'+user.id,Utilities.getUuid());
@@ -3895,17 +4010,27 @@ function pcStateWrite_(user,key,body) {
   if(sheet.getMaxRows()<needed)sheet.insertRowsAfter(sheet.getMaxRows(),needed-sheet.getMaxRows());
   sheet.getRange(first,1,rows.length,10).setValues(rows);
   // Commit only after every payload part was written successfully.
-  sheet.appendRow([String(user.id),key,revision,generation,-1,parts.length,updated,request,digest,'']);
+  var committed=[String(user.id),key,revision,generation,-1,parts.length,updated,request,digest,''];
+  sheet.appendRow(committed);
   props.setProperty('LK_PC_STATE_'+user.id,Utilities.getUuid());
+  var nextMetadata=metadata.concat(rows.map(function(row){return row.slice(0,9);}),[committed.slice(0,9)]);
   try{
-    var keep=Object.create(null);pcStateHeaders_(user).filter(function(h){return String(h.row[1])===key;})
-      .sort(function(a,b){return Number(b.row[2])-Number(a.row[2]);}).slice(0,3)
+    var keep=Object.create(null);keep[generation]=true;
+    headers.filter(function(h){return String(h.row[1])===key;})
+      .sort(function(a,b){return Number(b.row[2])-Number(a.row[2]);}).slice(0,2)
       .forEach(function(h){keep[String(h.row[3])]=true;});
-    var count=sheet.getLastRow()-1,meta=sheet.getRange(2,1,count,9).getValues();
-    for(var i=meta.length-1;i>=0;i--)if(String(meta[i][0])===String(user.id)&&String(meta[i][1])===key&&!keep[String(meta[i][3])])sheet.deleteRow(i+2);
-  }catch(ignored){}
-  var current=pcStateLatest_(pcStateHeaders_(user),key);
-  return {accountSyncProtocol:1,userId:String(user.id),document:pcStateRead_(user,key,current)};
+    for(var i=metadata.length-1;i>=0;i--)if(metadata[i]&&String(metadata[i][0])===String(user.id)&&String(metadata[i][1])===key&&!keep[String(metadata[i][3])]){
+      sheet.deleteRow(i+2);nextMetadata.splice(i,1);
+    }
+  }catch(ignored){nextMetadata=null;}
+  if(observed)observed.rows=nextMetadata;
+  // Apps Script buffers spreadsheet writes. Finish them while the request
+  // still holds its script lock, before acknowledging the saved document.
+  SpreadsheetApp.flush();
+  // Both parts and the commit marker have acknowledged their writes. Return
+  // their exact JSON snapshot without rereading the whole table and payload.
+  var document=pcStateDescriptor_({row:committed});document.value=JSON.parse(raw);
+  return {accountSyncProtocol:1,userId:String(user.id),document:document};
 }
 
 // Account-owned exam attempts. Only these endpoints can write the reserved document.
@@ -3961,11 +4086,14 @@ function examExpand_(doc) {
   return doc;
 }
 function examDocument_(user) {
-  return examExpand_(pcStateRead_(user,EXAM_STATE_KEY_,pcStateLatest_(pcStateHeaders_(user),EXAM_STATE_KEY_)));
+  var observed={rows:pcStateMetadata_(user)};
+  var doc=examExpand_(pcStateRead_(user,EXAM_STATE_KEY_,pcStateLatest_(pcStateHeaders_(user,observed.rows),EXAM_STATE_KEY_)));
+  doc.pcStateObserved=observed;return doc;
 }
 function examReply_(user,doc,completion) {
-  var value=doc.value?JSON.parse(JSON.stringify(doc.value)):null;
-  if(value){delete value.sourceTest;delete value.sourceQuestions;delete value.questionOrder;delete value.answerOrder;}
+  var visible=null;
+  if(doc.value){visible={};Object.keys(doc.value).forEach(function(key){if(['sourceTest','sourceQuestions','questionOrder','answerOrder'].indexOf(key)<0)visible[key]=doc.value[key];});}
+  var value=visible?copyObject_(visible):null;
   var out={examProtocol:1,userId:String(user.id),serverNow:Date.now(),document:{revision:doc.revision,value:value}};
   if(completion)out.completion=completion;
   else if(value){var record=findResultRecord_(user.id,value.test.id);if(record)out.completion={result:record.result,review:safeResultReview_(user,record),alreadyAccepted:true};}
@@ -3976,7 +4104,8 @@ function examIdentifier_(value) {
   return value;
 }
 function examWrite_(user,doc,value,request) {
-  return examExpand_(pcStateWrite_(user,EXAM_STATE_KEY_,{expectedRevision:doc.revision,requestId:request||Utilities.getUuid(),value:examPack_(value)}).document);
+  var next=examExpand_(pcStateWrite_(user,EXAM_STATE_KEY_,{expectedRevision:doc.revision,requestId:request||Utilities.getUuid(),value:examPack_(value)},doc.pcStateObserved).document);
+  next.pcStateObserved=doc.pcStateObserved;return next;
 }
 function examCheckpoint_(attempt,checkpoint) {
   if(!checkpoint||!checkpoint.answers||typeof checkpoint.answers!=='object'||Array.isArray(checkpoint.answers))fail_('Некоректні відповіді спроби.','BAD_REQUEST');
@@ -4175,6 +4304,8 @@ var LKReport_=(function(){
 // A replacement is another version of the same test. A separately created
 // test keeps its own identity, even when its title happens to be identical.
 const identity=value=>String(value??'');
+// Some Apps Script runtimes omit Intl; the same module is embedded in Code.gs.
+const compareIds=typeof Intl==='object'&&typeof Intl.Collator==='function'?new Intl.Collator('en',{numeric:true}).compare:(a,b)=>a.localeCompare(b,'en',{numeric:true});
 function testSeriesResolver(tests=[]) {
  const parents=new Map();
  for(const test of tests)if(identity(test.id))parents.set(identity(test.id),identity(test.canonicalTestId||test.replacesId||test.id));
@@ -4192,7 +4323,7 @@ function resultTestKey(result,resolve=value=>identity(value)) {
 }
 function compareAttempts(a,b) {
  return (Date.parse(a.completedAt)||0)-(Date.parse(b.completedAt)||0)
-  ||identity(a.id).localeCompare(identity(b.id),'en',{numeric:true});
+  ||compareIds(identity(a.id),identity(b.id));
 }
 function latestResults(results,tests=[],{byGroup=true}={}) {
  const resolve=testSeriesResolver(tests),latest=new Map();

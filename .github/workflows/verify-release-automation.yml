@@ -85,6 +85,8 @@ jobs:
           node tests/section-filters-ui.mjs
           node tests/results-ui.mjs
           node tests/responsive-ui.mjs
+          node tests/test-access-intake-ui.mjs
+          node tests/optimization-ui.mjs
           node tests/packaged-startup.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

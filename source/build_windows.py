@@ -5,6 +5,7 @@ Translate ELF relocation addends explicitly; objcopy alone drops ELF section
 symbols and is not a safe conversion for this build.
 """
 import pathlib,struct,subprocess,json,hashlib,io,mimetypes,re,os
+from public_assets import included
 ROOT=pathlib.Path(__file__).resolve().parent
 BUILD=ROOT/'build'
 CONFIG=json.loads((ROOT/'package.json').read_text())
@@ -82,9 +83,6 @@ def elf_to_coff(src,dst):
     return audit
 
 def assets():
-    for required in ['vendor/pdfjs/build/pdf.mjs','vendor/pdfjs/build/pdf.worker.mjs']:
-        if not (ROOT/'web'/required).is_file():
-            raise FileNotFoundError('PDF.js source is incomplete: '+required)
     files={'office':('office-import.js','text/javascript; charset=utf-8'),'word_sample':('test-import-sample.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'),'excel_sample':('test-import-sample.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),'statement':('statement.js','text/javascript; charset=utf-8'),'jspdf':('vendor/jspdf.umd.min.js','text/javascript; charset=utf-8'),'font':('statement-font.ttf','font/ttf'),'html':('index.html','text/html; charset=utf-8'),'js':('app.js','text/javascript; charset=utf-8'),'core':('core.js','text/javascript; charset=utf-8'),'css':('style.css','text/css; charset=utf-8'),'icon':('icon.png','image/png')}
     lines=[]
     for key,(name,mime) in files.items():
@@ -92,12 +90,11 @@ def assets():
         lines.append(f'static const unsigned char asset_{key}[]={{'+','.join(map(str,raw))+'};')
         lines.append(f'static const unsigned int asset_{key}_size={len(raw)};')
     extras=[]
-    # The web directory is the public bundle. Discover its complete contents
-    # instead of maintaining a second manual list of JavaScript modules.
+    # Discover active public files through the shared asset policy.
     primary={name for name,mime in files.values()}
     for path in sorted((ROOT/'web').rglob('*')):
         relative=path.relative_to(ROOT/'web')
-        if not path.is_file() or relative.as_posix() in primary or any(part.startswith('.') for part in relative.parts): continue
+        if not path.is_file() or relative.as_posix() in primary or not included(relative.as_posix()): continue
         name='/'+path.relative_to(ROOT/'web').as_posix();key='extra_'+str(len(extras));raw=path.read_bytes()
         mime='text/javascript; charset=utf-8' if path.suffix in ['.js','.mjs'] else 'application/wasm' if path.suffix=='.wasm' else mimetypes.guess_type(name)[0] or 'application/octet-stream'
         lines.append(f'static const unsigned char asset_{key}[]={{'+','.join(map(str,raw))+'};')

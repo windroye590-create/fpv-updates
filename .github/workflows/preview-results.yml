@@ -47,13 +47,14 @@ jobs:
           node tests/cadet-card-ui.mjs
           node tests/section-filters-ui.mjs
           node tests/results-ui.mjs
-          node tests/materials-ui.mjs
           node tests/finish-delivery-ui.mjs
           node tests/start-finish-performance-ui.mjs
           node tests/written-ui.mjs
           node tests/review-presence-ui.mjs
           node tests/responsive-ui.mjs
           node tests/ui.mjs
+          node tests/test-access-intake-ui.mjs
+          node tests/optimization-ui.mjs
       - name: Build and verify the preview EXE
         working-directory: source
         run: |

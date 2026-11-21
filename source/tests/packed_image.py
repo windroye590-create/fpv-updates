@@ -4,6 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from public_assets import included
 
 
 PRIMARY = {
@@ -105,7 +108,7 @@ def main():
     metadata = json.loads(args.metadata.read_text()) if args.metadata else None
     assets = extract(args.executable, args.root, metadata)
     missing = []
-    files = sorted(metadata) if metadata else [file.relative_to(args.root / 'web').as_posix() for file in sorted((args.root / 'web').rglob('*')) if file.is_file() and not any(p.startswith('.') for p in file.relative_to(args.root / 'web').parts)]
+    files = sorted(metadata) if metadata else [file.relative_to(args.root / 'web').as_posix() for file in sorted((args.root / 'web').rglob('*')) if file.is_file() and included(file.relative_to(args.root / 'web').as_posix())]
     for relative in files:
         route = '/' if relative == 'index.html' else '/' + relative
         if route not in assets:

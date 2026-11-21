@@ -87,14 +87,11 @@ try{
   await click('reset-filters');await count('#test-list .test-card',4);assert.equal(await page.locator('#filter').inputValue(),'');
   await nav('cadets');assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#filter').inputValue(),'cadet0');await count('.table-wrap tbody tr',1);
  });
- await check('Materials reveal their local filters with an accessible button and show active selection while collapsed',async()=>{
-  await nav('materials');await count('.test-card',3);const toggle=page.locator('[data-action="toggle-material-filters"]');assert.equal(await toggle.getAttribute('aria-expanded'),'false');assert.equal(await page.locator('#material-filters').isVisible(),false);
-  await toggle.click();assert.equal(await toggle.getAttribute('aria-expanded'),'true');assert.equal(await toggle.evaluate(el=>document.activeElement===el),true);
-  await page.keyboard.press('Enter');assert.equal(await toggle.getAttribute('aria-expanded'),'false');await page.keyboard.press('Enter');assert.equal(await toggle.getAttribute('aria-expanded'),'true');assert.equal(await page.locator('#shared-group').inputValue(),'');assert.equal(await page.locator('#shared-test').inputValue(),'');
-  await page.locator('#shared-group').selectOption('g2');await count('.test-card',2);await page.locator('#shared-test').selectOption('t2');await count('.test-card',1);await page.locator('#material-search').fill('Посібник другої');
-  await click('toggle-material-filters');assert.equal(await page.locator('#material-filters').isVisible(),false);assert.match(await page.locator('.material-filter-toggle').innerText(),/Фільтри\s+2/);assert.match(await page.locator('.material-filter-toggle').innerText(),/Група 2/);
-  await page.screenshot({path:path.join(root,'verification/section-filters-materials.png'),fullPage:true});
-  await nav('results');await settled();assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#shared-test').inputValue(),'t1');
+ await check('Paused materials have no menu, filters or background requests',async()=>{
+  await nav('home');assert.equal(await page.locator('[data-page="materials"]').count(),0);
+  await nav('materials');await page.getByRole('heading',{name:'Кабінет інструктора',exact:true}).waitFor();
+  assert.equal(await page.locator('#material-search,#material-filters').count(),0);
+  assert.equal(calls.filter(p=>/\/materials(?:\/|$)/.test(p.path)).length,0);
  });
  await check('Analytics sends its own group and test selection to the real application request handler',async()=>{
   await analyticsPage();assert.equal(await page.locator('#shared-group').inputValue(),'');assert.equal(await page.locator('#shared-test').inputValue(),'');assert.deepEqual(calls.filter(p=>p.path==='/api/instructor/analytics').at(-1).body,{groupName:'',testId:''});
@@ -105,8 +102,7 @@ try{
   await nav('results');assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#shared-test').inputValue(),'t1');
   const request=calls.filter(p=>p.path==='/api/instructor/analytics').at(-1);assert.deepEqual(request.body,{groupName:'Група 2',testId:'t2'});
  });
- await check('Resetting material filters leaves Results, Analytics and Cadets selections intact',async()=>{
-  await nav('materials');await click('toggle-material-filters');await click('reset-filters');await page.waitForFunction(()=>document.querySelector('#shared-group')?.value===''&&document.querySelector('#shared-test')?.value==='');assert.equal(await page.locator('.material-filter-toggle .result-tab-count').count(),0);
+ await check('Results, Analytics and Cadets retain independent selections',async()=>{
   await nav('cadets');assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#filter').inputValue(),'cadet0');
   await analyticsPage();assert.equal(await page.locator('#shared-group').inputValue(),'g2');assert.equal(await page.locator('#shared-test').inputValue(),'t2');
  });
@@ -117,7 +113,6 @@ try{
   await nav('tests');assert.equal(await page.locator('#shared-group').inputValue(),'g2');assert.equal(await page.locator('#filter').inputValue(),'Загальний');
   await nav('cadets');assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#filter').inputValue(),'cadet0');
   await nav('results');assert.equal(await page.locator('#shared-group').inputValue(),'g1');assert.equal(await page.locator('#shared-test').inputValue(),'t1');
-  await nav('materials');assert.equal(await page.locator('#material-search').inputValue(),'Посібник другої');
   await analyticsPage();assert.equal(await page.locator('#shared-group').inputValue(),'g2');assert.equal(await page.locator('#shared-test').inputValue(),'t2');
  });
  await check('A delayed analytics reply cannot replace statistics for the currently selected group',async()=>{
@@ -143,12 +138,11 @@ try{
    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.equal(await page.locator('#test-list').count(),1);
   }finally{release();await page.unroute('**/rpc',delay);}
  });
- await check('Local controls fit narrow windows in both themes, including expanded material filters',async()=>{
+ await check('Local controls fit narrow windows in both themes, with the simplified menu',async()=>{
   for(const theme of ['light','dark']){
    if(theme==='dark')await click('theme');
-   for(const screen of ['home','tests','cadets','results','materials','analytics']){
+   for(const screen of ['home','tests','cadets','results','analytics']){
     if(screen==='analytics')await analyticsPage();else await nav(screen);
-    if(screen==='materials'&&await page.locator('[data-action="toggle-material-filters"]').getAttribute('aria-expanded')==='false')await click('toggle-material-filters');
     for(const width of [1440,900,640,480,320]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,screen+' '+width+' '+theme);}
    }
   }

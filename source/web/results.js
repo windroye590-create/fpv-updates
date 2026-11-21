@@ -22,6 +22,22 @@ export function compactResults(rows,{instructor=false,allowDelete=false,groupSel
 const compare=(a,b)=>String(a).localeCompare(String(b),'uk');
 const newer=compareAttempts;
 
+// UI filters and theme changes do not alter the authoritative arrays. Keep a
+// few group models outside saved account state, and invalidate on data writes.
+export function createRankingCache(limit=3){
+ const accounts=new WeakMap();
+ return (source,groupName)=>{
+  const stamp=[source.results,source.tests,source.cadets,source.results?.length,source.tests?.length,source.cadets?.length,source.resultWriteVersion||0,source.workspaceRevisions?.results,source.workspaceRevisions?.tests,source.workspaceRevisions?.cadets];
+  let entry=accounts.get(source);
+  if(!entry||stamp.some((v,i)=>v!==entry.stamp[i])){entry={stamp,groups:new Map()};accounts.set(source,entry);}
+  let ranking=entry.groups.get(groupName);
+  if(ranking){entry.groups.delete(groupName);entry.groups.set(groupName,ranking);return ranking;}
+  ranking=buildRanking(source,groupName);entry.groups.set(groupName,ranking);
+  if(entry.groups.size>limit)entry.groups.delete(entry.groups.keys().next().value);
+  return ranking;
+ };
+}
+
 export function buildRanking(source,groupName) {
  const resolve=testSeriesResolver(source.tests),results=latestResults(source.results||[],source.tests).filter(r=>r.groupName===groupName);
  const members=new Map();

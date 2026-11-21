@@ -27,6 +27,24 @@ class Range {
     return this;
   }
   getValue() { return this.getValues()[0][0]; }
+  createTextFinder(text) {
+    const range=this;let entire=false,sensitive=false,regex=false;
+    const finder={
+      matchEntireCell(value){entire=value;return finder;},
+      matchCase(value){sensitive=value;return finder;},
+      useRegularExpression(value){regex=value;return finder;},
+      findAll(){
+        const matches=[];
+        const expected=sensitive?String(text):String(text).toLowerCase();
+        for(let y=0;y<range.rowCount;y++)for(let x=0;x<range.columnCount;x++){
+          const value=String(range.sheet.rows[range.row-1+y]?.[range.column-1+x]??'');
+          const actual=sensitive?value:value.toLowerCase();
+          if(regex?new RegExp(entire?'^(?:'+text+')$':text,sensitive?'':'i').test(value):entire?actual===expected:actual.includes(expected))matches.push(new Range(range.sheet,range.row+y,range.column+x));
+        }
+        return matches;
+      }
+    };return finder;
+  }
   getDisplayValues() {return this.getValues().map(row=>row.map(value=>String(value)));}
   setValue(value) { return this.setValues([[value]]); }
   setFontWeight() { return this; }
@@ -179,6 +197,7 @@ const context = vm.createContext({
   isNaN,
   decodeURIComponent,
   SpreadsheetApp: {
+    flush() {},
     newConditionalFormatRule:()=>{const r={whenFormulaSatisfied(v){r.formula=v;return r;},setBackground(){return r;},setFontColor(){return r;},setRanges(v){r.ranges=v;return r;},build(){return {getBooleanCondition:()=>({getCriteriaValues:()=>[r.formula]}),ranges:r.ranges};}};return r;},
     openById: (id) => {
       if (String(id) === BACKEND_SPREADSHEET_ID) return spreadsheet;

@@ -67,7 +67,7 @@ try{
  await check('A newly owned exam also reaches question one without discovery or claim calls',async()=>{
   await page.locator('.nav [data-page=tests]').click();await page.locator('[data-action=start][data-id="'+exam.id+'"]').click();await page.locator('#modal[open]').waitFor();const first=calls.length;await page.locator('#modal button.primary').click();await page.locator('.runner').waitFor();
   const action=calls.slice(first).filter(r=>r.path==='/api/workspace'||r.path==='/api/tests/'+exam.id||r.path.startsWith('/api/exam-session'));
-  assert.deepEqual(action.map(r=>r.path),['/api/exam-session/start']);assert.equal(saved().run.test.questions.length,50);assert.equal(saved().run.locked,false);
+  assert.deepEqual(action.map(r=>r.path),['/api/exam-session/start']);assert.equal(saved().run.test.questions.length,50);assert.equal(saved().run.locked,false);assert.equal(saved().examAvailable,undefined);
   await page.screenshot({path:new URL('../verification/fast-start-50-question-exam.png',import.meta.url).pathname});
  });
  assert.deepEqual(errors,[]);

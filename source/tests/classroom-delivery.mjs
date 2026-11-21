@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import * as C from '../web/core.js';
 import {createExamSession} from '../web/exam-session.js';
 import {createAccountSync} from '../web/account-sync.js';
+import {createPublicTableSync} from '../web/public-table-sync.js';
 process.env.LITAKOVA_SERVER_SOURCE=new URL('../Code.gs',import.meta.url).pathname;
 const {api,context,credential,instructorToken,lock,regressionTest,regressionBody,publicRows}=await import('./fixtures/server_model.mjs');
 const checks=[];
@@ -64,7 +65,9 @@ await check('Twenty submissions keep exact answers after BUSY and lost acknowled
   // The acknowledgement may be lost after the authoritative row committed.
   const replay=raw('POST','/api/results',person.token,bodies[i]);
   assert.equal(replay.result.id,accepted.result.id);assert.equal(replay.alreadyAccepted,true);
-  assert.equal(replay.tableSynced,false);assert.equal(replay.publicTableSync.state,'pending');
+  assert.equal(replay.tableSynced,false);
+  const view={},publication=createPublicTableSync({session:()=>person,account:()=>view,rpc:async()=>{}});
+  assert.equal(publication.observe(replay,person.token),true);assert.equal(view.publicTableSync.state,'pending');
   assert.equal(JSON.stringify(bodies[i]),before);
   assert.equal(context.listResults_(person.user.id).filter(r=>r.testId===training.id).length,1);
  }));

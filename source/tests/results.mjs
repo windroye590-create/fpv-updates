@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import * as C from '../web/core.js';
-import {choiceSummary,compactResults,buildRanking,searchRanking,rankingTable,rankingCSV} from '../web/results.js';
+import {choiceSummary,compactResults,buildRanking,createRankingCache,searchRanking,rankingTable,rankingCSV} from '../web/results.js';
 
 const checks=[];
 async function check(name,run){await run();checks.push(name);console.log('PASS '+name);}
@@ -125,7 +125,7 @@ await check('Building and filtering a ranking never modifies authoritative score
 // guards, rather than rendering an incomplete official ranking from recent rows.
 const app=fs.readFileSync(new URL('../web/app.js',import.meta.url),'utf8');
 function appFunction(name){const start=app.search(new RegExp('^(?:async )?function '+name+'\\(','m'));assert.ok(start>=0);const next=app.slice(start+1).search(/\n(?:async )?function /);return next<0?app.slice(start):app.slice(start,start+1+next);}
-const state={...source(),resultsView:'ranking',resultTotal:3},box={C,e:C.esc,filter:'',account:()=>state,instructor:()=>true,selectedGroup:()=>({name:'Група 1'}),searchRanking,buildRanking,rankingTable,compactResults,paginate:(_,items)=>({items,controls:''}),empty:(name,description)=>name+' '+description};
+const state={...source(),resultsView:'ranking',resultTotal:3},box={C,e:C.esc,filter:'',account:()=>state,instructor:()=>true,selectedGroup:()=>({name:'Група 1'}),searchRanking,cachedRanking:createRankingCache(),rankingTable,compactResults,paginate:(_,items)=>({items,controls:''}),empty:(name,description)=>name+' '+description};
 vm.createContext(box);for(const name of ['resultsView','rankingActive','pendingReviewsActive','groupRanking','resultsTable'])vm.runInContext(appFunction(name),box);
 await check('The real ranking screen refuses a truncated history until every result is loaded',()=>{
  state.resultTotal=10000;assert.match(box.resultsTable(),/Потрібна повна історія/);assert.doesNotMatch(box.resultsTable(),/<table/);state.resultTotal=3;assert.match(box.resultsTable(),/<table/);

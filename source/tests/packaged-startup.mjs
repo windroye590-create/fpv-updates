@@ -38,7 +38,8 @@ function mockRPC(p){
 const answer='Збережена письмова відповідь. '.repeat(90);
 const pending={testTitle:'Збережена письмова робота',attempts:0,body:{submissionId:'pc-packed-pending',testId:'cached-work',userId:cadet.user.id,answers:[{questionId:'written-1',writtenAnswer:answer}],durationSeconds:5}};
 const cached={version:1,theme:'dark',session:cadet,groups:[group],accounts:{[cadet.user.id]:{tests:[],results:[],cadets:[],fullTests:{},pending:[pending],reviews:{},draft:{title:'Збережена чернетка',questions:[]}}}};
-const states=new Map(),journals=new Map(),requests=[],checks=[];
+Object.assign(cached.accounts[cadet.user.id],{materials:[{id:'saved-pdf',title:'Archived material'}],materialProgress:{'saved-pdf':{lastPage:3,pending:true}},materialSaved:{'saved-pdf':'legacy-private-cache'}});
+const states=new Map(),journals=new Map(),requests=[],rpcRequests=[],checks=[];
 let active=next,blockModule=false,offline=false,slow=false,failRead=false,failJournal=false,slowJournal=false,waiting=[];
 const csp="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const server=http.createServer(async(req,res)=>{
@@ -60,7 +61,7 @@ const server=http.createServer(async(req,res)=>{
   if(u.pathname==='/clock'){json({ok:true,uptime:100000+performance.now(),launchId:'packed-browser'});return;}
   if(u.pathname.startsWith('/updates/')){json({ok:true,state:2,currentVersion:release.version,currentCode:release.versionCode,message:'Установлено актуальну версію.'});return;}
   if(u.pathname==='/rpc'){
-   const parts=[];for await(const part of req)parts.push(part);const p=JSON.parse(Buffer.concat(parts));
+   const parts=[];for await(const part of req)parts.push(part);const p=JSON.parse(Buffer.concat(parts));rpcRequests.push(p);
    if(offline){json({ok:false,code:'NETWORK',error:'Ізольований тест без мережі'});return;}
    json(mockRPC(p));return;
   }
@@ -97,6 +98,15 @@ try{
   offline=true;const p=await open('cached',cached);await p.getByRole('heading',{name:/Вітаємо/}).waitFor();
   const a=states.get('cached').accounts[cadet.user.id];assert.equal(a.pending[0].body.answers[0].writtenAnswer,answer);assert.equal(a.draft.title,cached.accounts[cadet.user.id].draft.title);
   assert.ok(await p.locator('body').evaluate(el=>el.classList.contains('dark')));
+ });
+ await check('The packed app omits the materials reader while preserving legacy private data and PDF export',async()=>{
+  const p=context.pages()[0];assert.equal(await p.locator('[data-page="materials"],.learning-unit').count(),0);
+  await p.evaluate(async()=>{const app=await import('/app.js');await app.navigate('materials');await app.clickAction(document.querySelector('[data-action="refresh"]'));});
+  await p.getByRole('heading',{name:/Вітаємо/}).waitFor();
+  assert.equal(rpcRequests.filter(p=>/\/materials(?:\/|$)/.test(p.path)).length,0);
+  for(const key of ['materials','materialProgress','materialSaved'])assert.deepEqual(states.get('cached').accounts[cadet.user.id][key],cached.accounts[cadet.user.id][key]);
+  assert.equal(next.manifest['/materials.js'],undefined);assert.equal(next.manifest['/learning.js'],undefined);
+  assert.ok(!Object.keys(next.manifest).some(p=>p.startsWith('/vendor/pdfjs/')));assert.ok(next.manifest['/vendor/jspdf.umd.min.js']);
  });
  await check('The post-update return marker opens the profile and retains the queued written answer',async()=>{
   const p=await open('post-update',{...structuredClone(cached),updateReturnPage:'more',updateTargetCode:138});

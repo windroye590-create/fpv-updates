@@ -1,6 +1,8 @@
 """Validate the packaged Windows image, imports, icons and relocations."""
-import struct,pathlib,hashlib,json,re
+import struct,pathlib,hashlib,json,re,sys
 root=pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(root))
+from public_assets import included
 version=json.loads((root/'package.json').read_text())['version']
 exe=root/'build'/json.loads((root/'package.json').read_text())['executableName'];b=exe.read_bytes()
 assert b[:2]==b'MZ'
@@ -79,7 +81,7 @@ for typ,branch in root_entries:
 assert sum(t==3 for t,*_ in blobs)==6
 assert sorted(icon_sizes)==[16,32,48,64,128,256]
 for file in (root/'web').rglob('*'):
-    if file.is_file() and not any(part.startswith('.') for part in file.relative_to(root/'web').parts):
+    if file.is_file() and included(file.relative_to(root/'web').as_posix()):
         assert file.read_bytes() in b, str(file)
 stack=(root/'build/native.su').read_text()
 max_stack=max(int(line.split('\t')[1]) for line in stack.splitlines())

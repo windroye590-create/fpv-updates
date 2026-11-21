@@ -1,6 +1,8 @@
 // A replacement is another version of the same test. A separately created
 // test keeps its own identity, even when its title happens to be identical.
 const identity=value=>String(value??'');
+// Some Apps Script runtimes omit Intl; the same module is embedded in Code.gs.
+const compareIds=typeof Intl==='object'&&typeof Intl.Collator==='function'?new Intl.Collator('en',{numeric:true}).compare:(a,b)=>a.localeCompare(b,'en',{numeric:true});
 export function testSeriesResolver(tests=[]) {
  const parents=new Map();
  for(const test of tests)if(identity(test.id))parents.set(identity(test.id),identity(test.canonicalTestId||test.replacesId||test.id));
@@ -18,7 +20,7 @@ export function resultTestKey(result,resolve=value=>identity(value)) {
 }
 export function compareAttempts(a,b) {
  return (Date.parse(a.completedAt)||0)-(Date.parse(b.completedAt)||0)
-  ||identity(a.id).localeCompare(identity(b.id),'en',{numeric:true});
+  ||compareIds(identity(a.id),identity(b.id));
 }
 export function latestResults(results,tests=[],{byGroup=true}={}) {
  const resolve=testSeriesResolver(tests),latest=new Map();

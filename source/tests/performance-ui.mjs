@@ -57,19 +57,13 @@ const failures=[];page.on('pageerror',e=>failures.push(e.message));
 const report={kind:'local_chromium_synthetic_performance',networkDelayMs:delay,count,lists:{},pdf:{}};
 try{
  await page.goto('http://127.0.0.1:'+server.address().port+'/?key=perf');await page.locator('.topbar').filter({hasText:'Оновлено'}).waitFor();
- for(const name of ['tests','cadets','results','materials']){
+ for(const name of ['tests','cadets','results']){
   const times=[];let nodes=0;
   for(let i=0;i<3;i++){
    const data=await page.evaluate(async name=>{const a=await import('/app.js'),t=performance.now();await a.navigate(name);await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {ms:performance.now()-t,nodes:document.querySelectorAll('#app *').length};},name);
    times.push(Math.round(data.ms));nodes=data.nodes;
   }
   report.lists[name]={medianMs:times.sort((a,b)=>a-b)[1],samplesMs:times,nodes};console.log(name,report.lists[name]);
- }
- for(const name of ['cold','warm']){
-  const at=calls.length;maxActive=0;const begin=performance.now();await page.locator('[data-action=material-open][data-id=m0]').click();
-  await page.waitForFunction(()=>document.querySelector('#modal')?.open && document.querySelector('#material-page')?.textContent==='1 / 3');
-  report.pdf[name]={ms:Math.round(performance.now()-begin),requests:calls.slice(at),maxActive};
-  await page.locator('[data-action=material-close]').click();await page.locator('#modal').waitFor({state:'hidden'});
  }
  if(process.env.LITAKOVA_PERFORMANCE_VALIDATE!=='0'){
   report.checks=[];
@@ -87,13 +81,13 @@ try{
   assert.ok(await page.locator('#shared-test option').count()<=52);
   await page.locator('[data-action=reset-filters]').click();await page.waitForFunction(()=>document.querySelector('#shared-test')?.value==='');assert.equal(await page.locator('#shared-test-search').inputValue(),'');
   report.checks.push('A bounded section selector finds the last test, survives search misses, and keeps Results separate from the Tests name search');
-  for(const [name,action,query,lastId]of [['tests','preview','Тест 1999','t1999'],['cadets','delete-cadet','Курсант 1999','c1999'],['results',null,'Курсант 9999',null],['materials','material-open','Матеріал 1199','m1199']]){
+  for(const [name,action,query,lastId]of [['tests','preview','Тест 1999','t1999'],['cadets','delete-cadet','Курсант 1999','c1999'],['results',null,'Курсант 9999',null]]){
    await page.evaluate(async n=>(await import('/app.js')).navigate(n),name);
-   await page.locator(name==='materials'?'#material-search':'#filter').fill('');
+   await page.locator('#filter').fill('');
    assert.ok(await page.locator('#app *').count()<1500);
    await page.locator('[data-action=list-page][data-index="2"]').click();
    await page.locator('.list-pager').filter({hasText:'51–100'}).waitFor();
-   await page.locator(name==='materials'?'#material-search':'#filter').fill(query);
+   await page.locator('#filter').fill(query);
    if(action)assert.equal(await page.locator(`[data-action="${action}"][data-id="${lastId}"]`).count(),1);
    else assert.ok((await page.locator('tbody').textContent()).includes(query));
    assert.equal(await page.locator('.list-pager').count(),0);report.checks.push(name+': bounded DOM, second page, search finds last record');
@@ -107,13 +101,7 @@ try{
   const allDownload=page.waitForEvent('download');await page.locator('[data-action=export-csv]').click();
   assert.equal(fs.readFileSync(await (await allDownload).path(),'utf8').split('\r\n').length,10001);
   report.checks.push('Clearing the search exports all 10000 results');
-  await page.evaluate(async()=>(await import('/app.js')).navigate('materials'));await page.locator('#material-search').fill('');jitter=true;finished=[];
-  await page.locator('[data-action=material-open][data-id=m1]').click();await page.waitForFunction(()=>document.querySelector('#modal')?.open&&document.querySelector('#material-page')?.textContent==='1 / 3');
-  const done=finished.filter(p=>p.includes('/chunks/'));assert.ok(done.indexOf('/api/materials/m1/chunks/1')<done.indexOf('/api/materials/m1/chunks/0'));
-  await page.locator('[data-action=material-close]').click();await page.locator('#modal').waitFor({state:'hidden'});report.checks.push('Out-of-order parallel batches reconstruct a valid PDF');
-  corrupt=true;await page.locator('[data-action=material-open][data-id=m2]').click();await page.getByText('Пошкоджений порядок сторінок PDF.',{exact:true}).waitFor();assert.equal(await page.locator('#modal').evaluate(el=>el.open),false);corrupt=false;const retryAt=calls.length;await page.locator('[data-action=material-open][data-id=m2]').click();await page.waitForFunction(()=>document.querySelector('#modal')?.open&&document.querySelector('#material-page')?.textContent==='1 / 3');assert.equal(calls.slice(retryAt).filter(p=>p.includes('/chunks/')).length,6);await page.locator('[data-action=material-close]').click();await page.locator('#modal').waitFor({state:'hidden'});report.checks.push('Damaged parallel batch cannot create a partial cache; a fresh retry succeeds');
-  revoked=true;const at=calls.length;await page.locator('[data-action=material-open][data-id=m2]').click();await page.getByText('Матеріал недоступний вашій групі.',{exact:true}).waitFor();
-  assert.equal(await page.locator('#modal').evaluate(el=>el.open),false);assert.ok(!calls.slice(at).some(p=>p.includes('/chunks/')));report.checks.push('Revoked access blocks the verified in-memory PDF cache');
+  assert.equal(await page.locator('[data-page="materials"]').count(),0);report.checks.push('The paused materials module has no navigation or reader work');
  }
  assert.deepEqual(failures,[]);report.failures=failures;
  fs.mkdirSync(new URL('../verification/',import.meta.url),{recursive:true});fs.writeFileSync(process.env.LITAKOVA_PERF_OUTPUT||new URL('../verification/performance-ui.json',import.meta.url),JSON.stringify(report,null,2));console.log(JSON.stringify(report.pdf));

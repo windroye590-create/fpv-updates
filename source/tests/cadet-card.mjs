@@ -33,6 +33,13 @@ check('Current material progress cannot borrow another cadet or an earlier revis
  const uid=String(a.user.id),m=['card-pdf','Навчальний PDF','','Тема',JSON.stringify([String(second.id)]),'','file',2,10,'a'.repeat(64),5,'1',new Date(),new Date(),true];context.sheet_('materials').appendRow(m);context.sheet_('materialProgress').appendRow(['card-pdf',1,uid,5,5,5,new Date(),new Date()]);context.sheet_('materialProgress').appendRow(['card-pdf',2,String(b.user.id),3,3,5,new Date(),new Date()]);
  let r=api('GET',path,instructorToken);assert.equal(r.materials.find(v=>v.material.id==='card-pdf').progress,null);context.sheet_('materialProgress').appendRow(['card-pdf',2,uid,2,4,5,new Date(),new Date()]);r=api('GET',path,instructorToken);assert.equal(r.materials.find(v=>v.material.id==='card-pdf').progress.maxPage,4);
 });
+check('A card can exclude materials storage reads while retaining history and notes',()=>{
+ const rows=context.dataRows_,materials=context.materialRows_;
+ context.dataRows_=name=>{if(name==='materialProgress'||name==='materials')throw Error('Paused materials were read');return rows(name);};
+ context.materialRows_=()=>{throw Error('Paused materials catalog was read');};
+ try{const r=api('GET',path,instructorToken,{includeMaterials:false});assert.deepEqual(Array.from(r.materials),[]);assert.ok(Array.isArray(r.results)&&Array.isArray(r.notes));}
+ finally{context.dataRows_=rows;context.materialRows_=materials;}
+});
 check('Deleting a cadet removes their notes and makes the old card unavailable',()=>{
  api('DELETE', '/api/instructor/users/'+a.user.id,instructorToken,{confirmUserId:String(a.user.id)});
  assert.equal(context.dataRows_('cadetNotes').filter(r=>String(r[0])===String(a.user.id)).length,0);assert.throws(()=>api('GET',path,instructorToken),e=>e.code==='NOT_FOUND');
