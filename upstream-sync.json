@@ -77,5 +77,13 @@
   "fpvNativeIdentityChecks": 12,
   "releaseToolChecks": 66,
   "packedResources": 232,
-  "packagedStartupChecks": 10
+  "packagedStartupChecks": 10,
+  "verification": {
+    "status": "passed",
+    "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.6-preview.2",
+    "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44898317428",
+    "serverBuild": "pc-api26-bb4fe1c603bec685",
+    "actualWindowsChecks": 16,
+    "publicUpdateChannelUnchanged": true
+  }
 }
