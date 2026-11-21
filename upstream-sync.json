@@ -3,8 +3,8 @@
   "fromCommonCommit": "ca8988e9d0d0ddd5fac5bd0293cfe94d634f5ce0",
   "toCommonCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
   "commonVersion": "1.2.48",
-  "targetVersion": "1.0.7",
-  "targetCode": 8,
+  "targetVersion": "1.0.8",
+  "targetCode": 9,
   "changedFiles": [
     ".github/workflows/release.yml",
     ".github/workflows/verify-release-automation.yml",
@@ -64,14 +64,7 @@
   "packedResources": 27,
   "packagedStartupChecks": 11,
   "verification": {
-    "status": "passed",
-    "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.7-preview.3",
-    "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44907764166",
-    "serverBuild": "pc-api26-c94f2c63543ad054",
-    "actualWindowsChecks": 16,
-    "publicUpdateChannelUnchanged": true,
-    "commonWebFilesIdentical": 228,
-    "unportedChangedCommonFiles": []
+    "status": "local recovery and browser checks passed; signed Windows build pending"
   },
   "history": [
     {
@@ -88,6 +81,23 @@
         "actualWindowsChecks": 16,
         "publicUpdateChannelUnchanged": true
       }
+    },
+    {
+      "fromCommonCommit": "ca8988e9d0d0ddd5fac5bd0293cfe94d634f5ce0",
+      "toCommonCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
+      "commonVersion": "1.2.48",
+      "targetVersion": "1.0.7",
+      "targetCode": 8,
+      "verification": {
+        "status": "passed",
+        "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.7-preview.3",
+        "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44907764166",
+        "serverBuild": "pc-api26-c94f2c63543ad054",
+        "actualWindowsChecks": 16,
+        "publicUpdateChannelUnchanged": true,
+        "commonWebFilesIdentical": 228,
+        "unportedChangedCommonFiles": []
+      }
     }
   ],
   "newChecks": {
@@ -97,5 +107,15 @@
     "questionsInLargeExam": 200,
     "rankingBrowserHistoryRows": 12000
   },
-  "activeMaterialsReader": false
+  "activeMaterialsReader": false,
+  "fpvSpecificFixes": [
+    {
+      "version": "1.0.8",
+      "type": "authenticated password-wrapped local key recovery",
+      "keyRecoveryChecks": 8,
+      "privateStorageChecks": 20,
+      "privateStorageBrowserChecks": 18,
+      "noEmptyAccountFallback": true
+    }
+  ]
 }

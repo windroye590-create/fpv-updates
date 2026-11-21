@@ -1,7 +1,7 @@
 /* Strict signed release catalog format. No URLs or paths from JSON. */
 #define UPDATE_MAX_SIZE (64u*1024u*1024u)
-#define PC_VERSION_CODE 8u
-#define PC_VERSION_NAME "1.0.7"
+#define PC_VERSION_CODE 9u
+#define PC_VERSION_NAME "1.0.8"
 #define UPDATE_HOST L"github.com"
 #define UPDATE_PATH_PREFIX L"/windroye590-create/fpv-updates/releases/latest/download/"
 typedef struct {DWORD code,size;char name[32],file[128],sha256[65];} UPDATE_RELEASE;

@@ -83,8 +83,24 @@ export function createSecureStorage({local,keepalive=()=>false}){
   if(!enabled)return {account:null,journals:[],session};if(reply?.localStorageProtocol!==2||String(reply.userId)!==String(session.user.id)||!/^[a-f0-9]{64}$/.test(reply.key))throw fail('Для захищених локальних копій оновіть сервер до API 22.','UPDATE_REQUIRED');
   const id=String(session.user.id),kid=await keyId(reply.key),stored=await candidates(id);let opened=null;
   for(const record of stored){if(record.keyId!==kid||record.user.role!==session.user.role)continue;try{opened=await openRecord(record,reply.key);if(record!==root.accounts[id])recovered++;break;}catch{}}
+  // A server key can change independently of this PC's encrypted objects.
+  // Recover only an authenticated owner record using its password-wrapped
+  // original key. Every manifest and private object must still authenticate;
+  // never replace an unreadable account with an empty one.
+  if(!opened){
+   const recoveredKeys=new Map(),triedWraps=new Set();
+   for(const record of stored){
+    if(record.keyId===kid||record.user.role!==session.user.role||normalize(record.user.username)!==normalize(session.user.username))continue;
+    let key=recoveredKeys.get(record.keyId);
+    if(!key){
+     const fingerprint=canonical({user:record.user,wrap:record.wrap});if(triedWraps.has(fingerprint))continue;triedWraps.add(fingerprint);
+     try{key=await unwrapKey(record,password);if(await keyId(key)!==record.keyId)continue;recoveredKeys.set(record.keyId,key);}catch{continue;}
+    }
+    try{opened=await openRecord(record,key);if(record!==root.accounts[id])recovered++;break;}catch{}
+   }
+  }
   if(stored.length&&!opened)throw fail('Не вдалося розблокувати наявну копію. Дані та резервні копії залишилися без змін.','LOCAL_COPY_UNAVAILABLE');
-  const a=opened?.active||await fresh(session,reply.key,password);a.user=publicUser(session.user);a.wrap=await wrapKey(reply.key,password,a.user);a.session=clone(session);
+  const a=opened?.active||await fresh(session,reply.key,password);a.user=publicUser(session.user);a.wrap=await wrapKey(a.key,password,a.user);a.session=clone(session);
   const legacy=await loadLegacy(a,session,!!opened);const account=opened?.account||legacy?.account||{};if(legacy?.additionalSnapshots?.length){account.legacySnapshots=[...(account.legacySnapshots||[]),...legacy.additionalSnapshots];migrationWarning='Збережено додаткову копію даних із попередньої версії. Поточну роботу залишено без змін.';}const j=await checked('/vault/journal',undefined,headers(a));recovered=Math.max(recovered,Number((await checked('/storage/status')).recoveredCopies)||0);
   return {account,session,journals:[...(legacy?.journals||[]),...(j.kind?[j]:[])],recoveredCopies:recovered};
  });}

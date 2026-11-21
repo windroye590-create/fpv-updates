@@ -1,6 +1,6 @@
 {
   "name": "fpv-komisiia-pc",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "type": "module",
   "scripts": {
@@ -29,7 +29,7 @@
     "test:intake-ui": "node tests/test-access-intake-ui.mjs",
     "test:packaged": "python3 tests/packed_image.py build/FPV-Komisiia-PC.exe --root . --check && node tests/packaged-startup.mjs",
     "test:storage-recovery": "python3 tests/storage-recovery/native-storage.py && node tests/storage-recovery/startup-journal.mjs && node tests/storage-recovery/training-transfer.mjs && node tests/storage-recovery/delivery-faults.mjs && node tests/storage-recovery/access-matrix.mjs && node tests/storage-recovery/instructor-concurrency.mjs && node tests/storage-recovery/training-resume-security.mjs",
-    "test:private-storage": "node tests/private-storage.mjs && node tests/private-storage-server.mjs && python3 tests/storage_json.py && python3 tests/storage_files.py && python3 tests/native_clock.py && node tests/remembered-login.mjs",
+    "test:private-storage": "node tests/private-storage.mjs && node tests/local-key-recovery.mjs && node tests/private-storage-server.mjs && python3 tests/storage_json.py && python3 tests/storage_files.py && python3 tests/native_clock.py && node tests/remembered-login.mjs",
     "test:private-storage-ui": "node tests/private-storage-ui.mjs",
     "test:audit": "node tests/audit-regressions.mjs && node tests/test-publication.mjs",
     "test:reliability": "node tests/fix-frontend-reliability.mjs && node tests/fix-server-reliability.mjs && node tests/fix-server-exams.mjs",
@@ -41,5 +41,5 @@
     "playwright": "1.62.1"
   },
   "executableName": "FPV-Komisiia-PC.exe",
-  "versionCode": 8
+  "versionCode": 9
 }

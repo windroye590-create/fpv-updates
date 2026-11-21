@@ -95,6 +95,20 @@ try{
  await check('An expired remembered session is forgotten instead of reopening on every restart',async()=>{expiry=true;await page.reload();await page.locator('#auth-form').waitFor();expiry=false;await page.reload();await page.locator('#auth-form').waitFor();assert.equal((await native.local('/vault/remembered')).remembered,false);});
  await check('A damaged remembered-login file allows a fresh login and keeps the private draft',async()=>{await login(teacher);native.corruptRemembered();await page.reload();await page.locator('#auth-form').waitFor();assert.equal(await page.locator('[data-startup-error]').count(),0);await login(teacher);assert.equal(await page.evaluate(async()=>(await import('/app.js')).account().draft.title),'REMEMBERED UI PRIVATE');await page.reload();await page.getByRole('heading',{name:'Кабінет інструктора',exact:true}).waitFor();});
  await check('A failed forget write keeps the account open and visibly reports the failed logout',async()=>{native.faults.failPath='/vault/forget';await page.locator('[data-action=logout]').click();await Promise.race([page.getByRole('heading',{name:'Зміни ще не надіслані'}).waitFor(),page.locator('#toast').filter({hasText:'Synthetic'}).waitFor()]);if(await page.locator('#modal').isVisible())await page.locator('#modal button.primary').click();await page.locator('#toast').filter({hasText:'Synthetic'}).waitFor();assert.equal(await page.getByRole('heading',{name:'Кабінет інструктора',exact:true}).count(),1);assert.equal((await native.local('/vault/remembered')).remembered,true);native.faults.failPath='';await logout();await page.reload();await page.locator('#auth-form').waitFor();});
+ await check('A changed server key preserves the existing private account through online and offline login',async()=>{
+  const originalKey=keys.teacher,originalKeyId=native.profile.accounts.teacher.keyId;
+  keys.teacher='ef'.repeat(32);
+  try{
+   offline=false;await open();await login(teacher);
+   assert.equal(await page.evaluate(async()=>(await import('/app.js')).account().draft.title),'REMEMBERED UI PRIVATE');
+   assert.equal(native.profile.accounts.teacher.keyId,originalKeyId);
+   await logout();offline=true;await open();await login(teacher,true);
+   assert.equal(await page.evaluate(async()=>(await import('/app.js')).account().draft.title),'REMEMBERED UI PRIVATE');
+   await logout();offline=false;await open();await login(teacher);
+   assert.equal(await page.evaluate(async()=>(await import('/app.js')).account().draft.title),'REMEMBERED UI PRIVATE');
+   assert.equal(native.profile.accounts.teacher.keyId,originalKeyId);await logout();
+  }finally{keys.teacher=originalKey;offline=false;}
+ });
  assert.deepEqual(errors,[]);
  const report={status:'passed',passed:checks.length,checks,actualChromiumRendered:true,nativeProtocol:2,actualAppExecuted:true,packedAssets:!!process.env.PACKED_EXE,actualWindowsHostExecuted:false,productionRPCRequests:0,pageErrors:errors};
  fs.mkdirSync(path.join(root,'verification'),{recursive:true});fs.writeFileSync(path.join(root,'verification/private-storage-ui.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
