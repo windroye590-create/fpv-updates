@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "upstreamCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
+  "upstreamVersion": "1.2.48",
+  "fpvVersion": "1.0.7",
+  "commonWebFilesIdentical": 228,
+  "reviewedEditionDifferences": {
+    "app.js": "FPV Developer display without duplicated title and release footer",
+    "core.js": "FPV Developer label cleanup",
+    "icon.png": "FPV icon",
+    "index.html": "FPV favicon identity"
+  },
+  "preservedIdentityFiles": [
+    "commission.json",
+    "source/commission.json",
+    "automation.json",
+    "release-tools/update-public.pem",
+    "source/native/update_key.h",
+    "source/native/main.c",
+    "source/native/browser_identity.h",
+    "source/web/icon.png"
+  ],
+  "commonFilesPorted": 37,
+  "unportedChangedCommonFiles": []
+}

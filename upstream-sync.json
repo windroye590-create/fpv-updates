@@ -61,10 +61,17 @@
   "liveGoogleLoadMeasured": false,
   "fpvNativeIdentityChecks": 12,
   "releaseToolChecks": 66,
-  "packedResources": 232,
-  "packagedStartupChecks": 10,
+  "packedResources": 27,
+  "packagedStartupChecks": 11,
   "verification": {
-    "status": "local focused checks passed; release workflow pending"
+    "status": "passed",
+    "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.7-preview.3",
+    "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44907764166",
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "actualWindowsChecks": 16,
+    "publicUpdateChannelUnchanged": true,
+    "commonWebFilesIdentical": 228,
+    "unportedChangedCommonFiles": []
   },
   "history": [
     {
@@ -89,5 +96,6 @@
     "optimization": 20,
     "questionsInLargeExam": 200,
     "rankingBrowserHistoryRows": 12000
-  }
+  },
+  "activeMaterialsReader": false
 }

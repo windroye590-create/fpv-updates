@@ -1,0 +1,125 @@
+{
+  "status": "passed",
+  "commission": "FPV",
+  "version": "1.0.7",
+  "code": 8,
+  "distribution": "manual complete EXE",
+  "prerelease": true,
+  "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44907764166",
+  "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.7-preview.3",
+  "sourceCommit": "8ce1db52d8e0be0acc930fb4ddc5fac9fea3c3c5",
+  "commonSourceCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
+  "binary": {
+    "filename": "FPV-Komisiia-PC.exe",
+    "size": 2027815,
+    "sha256": "3ad38101cf0efb50c086dc1b58a29407b0843a9c59a6105ab4d9fbb9cde6dda2",
+    "signedCatalogVerified": true
+  },
+  "server": {
+    "version": 26,
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "fastTestStart": true,
+    "deferredResultStats": true,
+    "deletedAttemptRetakes": true,
+    "formattedResultsReady": true,
+    "cadetCriticalPath": true,
+    "cadetGoogleOptimization": true,
+    "conditionalReviewQueue": true
+  },
+  "deployment": {
+    "status": "passed",
+    "api": 26,
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "deployed": true,
+    "version": 4,
+    "previousVersion": 3
+  },
+  "windows": {
+    "status": "passed",
+    "passed": 16,
+    "checks": [
+      "Upgrade archives old data and refuses anonymous legacy or global journal access",
+      "Real AES-256-GCM and Windows DPAPI round-trip a private account object",
+      "Lost object acknowledgements retry idempotently without allowing overwrite",
+      "Changing a nonce, GCM tag or ciphertext is rejected even after valid DPAPI rewrapping",
+      "The GCM identity binds both the account owner and the immutable object identifier",
+      "The profile keeps three distinct backups and rejects conflicting commits",
+      "Corrupt profiles restore a verified backup while sharing violations remain visible errors",
+      "If every profile copy is damaged the host refuses an empty reset or overwrite",
+      "A large Unicode journal restores backups and never falsely acknowledges a rolled-back serial",
+      "Collection removes orphan objects and preserves every referenced object and account journal",
+      "Closing the native vault invalidates its capability and exposes backup recovery status",
+      "The remembered vault key is DPAPI-protected and contains no password or bearer token",
+      "A complete Windows host restart restores the saved key, private objects and last journal",
+      "A locked saved-login file reports an error and never falsely acknowledges logout",
+      "A corrupt saved-login cache cannot erase private data and can be repaired by a valid owner",
+      "Explicit logout remains forgotten after another complete Windows restart"
+    ],
+    "actualWindowsHostExecuted": true,
+    "realDPAPIVerified": true,
+    "realCNGGCMVerified": true,
+    "productionRPCRequests": 0,
+    "browserRendered": false
+  },
+  "publicUpdateChannelUnchanged": true,
+  "stableVersion": "1.0.5",
+  "stableChannelHashes": {
+    "FPV-Komisiia-PC.exe": "ac98986457aba6030f0022faddc68ced4b5d9049793a7cab40b5006d1598a6fc",
+    "updates.txt": "0fe5bdc0bfda42616fe91b12ca59baeb1175aca6fcd06f6423315b157fdc99e0",
+    "index.html": "6dfca7f098dbf16b5c8d60832d9d46c4b8223d5572fe781e0e49a9b173633561",
+    "icon.png": "8009da9cda2cbab1ea547d5932528d190bf4259256d4911f01158b7ffeec2d14"
+  },
+  "liveGoogleClassroomLoadMeasured": false,
+  "verifiedAt": "2026-11-21T13:20:37.235051+00:00",
+  "workflowConclusion": "success",
+  "publicExecutableDownloadedAndVerified": true,
+  "packedResources": 27,
+  "nativeCatalogChecks": 29,
+  "commonVersion": "1.2.48",
+  "materialsPaused": true,
+  "storedMaterialsPreserved": true,
+  "pdfStatementExportIncluded": true,
+  "checks": {
+    "cadet-critical-path": 12,
+    "cadet-google-optimization": 8,
+    "optimization": 20,
+    "commission-owner": 6,
+    "native-identity": 12,
+    "responsive-ui": 271,
+    "results-ui": 23,
+    "start-finish-performance": 19,
+    "start-finish-performance-ui": 5,
+    "retake-ranking": 8,
+    "finish-delivery-reliability": 14
+  },
+  "packagedStartup": {
+    "status": "passed",
+    "checks": 11,
+    "assets": 27
+  },
+  "commonSourceAudit": {
+    "status": "passed",
+    "upstreamCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
+    "upstreamVersion": "1.2.48",
+    "fpvVersion": "1.0.7",
+    "commonWebFilesIdentical": 228,
+    "reviewedEditionDifferences": {
+      "app.js": "FPV Developer display without duplicated title and release footer",
+      "core.js": "FPV Developer label cleanup",
+      "icon.png": "FPV icon",
+      "index.html": "FPV favicon identity"
+    },
+    "preservedIdentityFiles": [
+      "commission.json",
+      "source/commission.json",
+      "automation.json",
+      "release-tools/update-public.pem",
+      "source/native/update_key.h",
+      "source/native/main.c",
+      "source/native/browser_identity.h",
+      "source/web/icon.png"
+    ],
+    "commonFilesPorted": 37,
+    "unportedChangedCommonFiles": []
+  }
+}
