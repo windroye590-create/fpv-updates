@@ -119,5 +119,23 @@ await check('Wrong password is not retried and keeps the username and group visi
  assert.ok(nodes['#app'].innerHTML.includes('value="'+C.esc(group.name)+'" selected'));
  assert.ok(!JSON.stringify(storage).includes('incorrect-password'));
 });
+await check('The actual app clears an instructor-deleted training, drops its stale queue, and preserves a fresh retake across refresh',async()=>{
+ const person=api('POST','/api/register','',{fullName:'Повтор у застосунку',username:'app-retake-flow',groupId:group.id,...await C.credential('app-retake-password')});
+ storage={version:1,session:{token:person.token,user:person.user},groups:[],accounts:{},theme:'light'};journal={};offline=false;lostReply=false;diskFailure=false;
+ const H=await import('../web/app.js?deleted-retake-flow');await new Promise(resolve=>setTimeout(resolve,30));await H.refresh(true);
+ const test=makeTest('Повтор у справжньому застосунку');await H.refresh(true);
+ const raw=(m,p,b={})=>{const r=JSON.parse(context.doPost({postData:{contents:JSON.stringify(C.payload(m,p,person.token,b))}}).text);assert.equal(r.ok,true,JSON.stringify(r));return r;};
+ const first=runFor(test);first.userId=String(person.user.id);first.startPermit=raw('POST','/api/tests/'+test.id+'/start',{submissionId:first.submissionId}).startPermit;
+ H.account().run=first;await H.persist();const oldBody=C.submission(first,ticks);await H.finishRun(false);
+ const accepted=H.account().results.find(r=>String(r.testId)===String(test.id));assert.ok(accepted);
+ api('DELETE','/api/instructor/results/'+accepted.id,instructorToken,{confirmResultId:String(accepted.id)});
+ H.account().pending.push({body:oldBody,testTitle:test.title,userId:String(person.user.id),attempts:0,nextAt:0});await H.syncQueue(true);
+ assert.equal(H.account().pending.length,0);assert.ok(!H.account().deletedTestIds.includes(String(test.id)));
+ H.account().run=structuredClone(first);H.account().pcSync.shadow.training=structuredClone(first);await H.refresh(true);
+ assert.equal(H.account().run,null);assert.ok(H.account().retakeBackups.length);
+ const second=runFor(test);second.userId=String(person.user.id);second.startPermit=raw('POST','/api/tests/'+test.id+'/start',{submissionId:second.submissionId}).startPermit;
+ H.account().run=second;await H.persist();await H.refresh(true);assert.equal(H.account().run.submissionId,second.submissionId);
+ await H.finishRun(false);assert.equal(H.account().run,null);const final=H.account().results.find(r=>String(r.testId)===String(test.id));assert.ok(final);assert.notEqual(final.id,accepted.id);
+});
 fs.writeFileSync(new URL('../verification/flows.json',import.meta.url),JSON.stringify({kind:'application_state_machine_with_real_server_logic',productionVerified:false,windowsRuntimeVerified:false,passed:reports.length,checks:reports},null,2));
 console.log('Application state flows: '+reports.length+'/'+reports.length+' passed.');

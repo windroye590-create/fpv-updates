@@ -766,11 +766,11 @@ regression("Legacy layout migration preserves results, IDs and manual columns on
   sheet.rows=publicRows(sheet).map((r,i)=>r.slice(0,5).concat(r.slice(6,8),i===0?'Примітка інструктора':'Примітка '+i));sheet.maxColumns=8;sheet.hiddenColumns=new Set([6,7]);
   const before=sheet.rows.map(r=>[...r]);properties.deleteProperty(ready);properties.deleteProperty(backup);publicSpreadsheet.sheets.delete('Резерв таблиці до Excel');context.publicLayouts_=[];
   context.ensurePublicResultsSheet_(publicSpreadsheet);
-  const headers=sheet.rows[0],canonical=publicRows(sheet);assert.equal(headers[1],'Група');assert.equal(headers[2],'Тест');assert.equal(sheet.maxColumns,16);
+  const headers=sheet.rows[0],canonical=publicRows(sheet);assert.equal(headers[1],'Група');assert.equal(headers[2],'Тест');assert.equal(sheet.maxColumns,17);assert.ok(headers.includes('_Ключ тесту'));
   assert.ok(sheet.hiddenColumns.has(headers.indexOf('_ID курсанта')+1));assert.ok(sheet.hiddenColumns.has(headers.indexOf('_ID результату')+1));
   before.slice(1).forEach((r,i)=>{assert.deepEqual(canonical[i+1].slice(0,5),r.slice(0,5));assert.deepEqual(canonical[i+1].slice(6,8),r.slice(5,7));assert.equal(sheet.rows[i+1][headers.indexOf('Примітка інструктора')],r[7]);});
   assert.ok(publicSpreadsheet.getSheetByName('Резерв таблиці до Excel'));
-  const migrated=sheet.rows.map(r=>[...r]);context.ensurePublicResultsSheet_(publicSpreadsheet);assert.deepEqual(sheet.rows,migrated);assert.equal(sheet.maxColumns,16);
+  const migrated=sheet.rows.map(r=>[...r]);context.ensurePublicResultsSheet_(publicSpreadsheet);assert.deepEqual(sheet.rows,migrated);assert.equal(sheet.maxColumns,17);
  }finally{sheet.rows=saved;sheet.maxColumns=capacity;sheet.hiddenColumns=hidden;context.publicLayouts_=[];oldReady?properties.setProperty(ready,oldReady):properties.deleteProperty(ready);oldBackup?properties.setProperty(backup,oldBackup):properties.deleteProperty(backup);if(oldCopy)publicSpreadsheet.sheets.set('Резерв таблиці до Excel',oldCopy);else publicSpreadsheet.sheets.delete('Резерв таблиці до Excel');}
 });
 

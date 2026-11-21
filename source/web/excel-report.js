@@ -1,3 +1,4 @@
+import {latestResults,testSeriesResolver,resultTestKey} from './result-attempts.js';
 // The same report model and XML run in the browser and in Apps Script.
 // Values are written as numbers or explicit strings; cell text is never a formula.
 const rptMime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -31,11 +32,11 @@ export function reportModel(data,options={}){
  const columns=[['ПІБ курсанта',34],['Група',20],['Тест',38],['Дата завершення',22],['Результат',24],['Підсумковий бал',20],['Набрано балів',17],['Максимум балів',18],['Час проходження',18],['Правильних',16,true],['Неправильних',17,true],['Правильних, %',19,true],['ID курсанта',18,true],['ID результату',18,true],['Підтвердження збереженої роботи',38]];
  const ordered=results.slice().sort((a,b)=>(Date.parse(b.completedAt)||0)-(Date.parse(a.completedAt)||0)||rptSort(a.userName,b.userName));
  const resultRows=ordered.map(r=>{const state=rptPending(r)?7:r.passed?5:6,choice=rptChoice(r);return [r.userName,r.groupName,r.testTitle,rptCell(rptDate(r.completedAt,offset),4),rptCell(rptStatus(r),state),rptPercent(rptScore(r),state===7?2:r.passed?12:13),rptNumber(r.earnedPoints)??r.correct,rptNumber(r.maxPoints)??r.total,rptCell(rptTime(r.durationSeconds),3),choice?r.correct:'',choice?Math.max(0,choice-r.correct):'',rptPercent(choice?(Number(r.correct)||0)/choice:null),rptId(r.userId),rptId(r.id),r.examRecovered?'Підтвердив: '+(r.recoveredBy||'інструктор')+'; час зі збереженої роботи':''];});
- const byTest=new Map(),members=new Map(),latest=new Map();
- for(const t of tests)if(t&&rptId(t.id))byTest.set(rptId(t.id),t);
+ const resolve=testSeriesResolver(tests),current=latestResults(results,tests),byTest=new Map(),members=new Map(),latest=new Map();
+ for(const t of tests)if(t&&rptId(t.id))byTest.set(resolve(t.id),{...t,id:resolve(t.id)});
  for(const u of cadets){if(u.role&&u.role!=='cadet')continue;const group=String(u.groupName||'');members.set(JSON.stringify([rptId(u.id),group]),{id:rptId(u.id),name:u.fullName||u.username||'',username:u.username||'',group});}
- for(const r of ordered){
-  const tid=rptId(r.testId),person=JSON.stringify([rptId(r.userId),String(r.groupName||'')]);
+ for(const r of current){
+  const tid=resultTestKey(r,resolve),person=JSON.stringify([rptId(r.userId),String(r.groupName||'')]);
   if(!byTest.has(tid))byTest.set(tid,{id:tid,title:r.testTitle,historical:true});
   if(!members.has(person))members.set(person,{id:rptId(r.userId),name:r.userName,group:String(r.groupName||''),historical:true});
   const key=JSON.stringify([person,tid]);if(!latest.has(key))latest.set(key,r);

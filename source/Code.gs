@@ -20,8 +20,8 @@ const PUBLIC_SYNC_RETRY = 'LK_PUBLIC_SYNC_RETRY_V1';
 const PUBLIC_SYNC_DELAY_MS = 30000;
 const REVIEW_LEASE_MS = 120000;
 const REVIEW_LEASE_PREFIX = 'LK_REVIEW_SESSION_V1_';
-const LATEST_APP_VERSION_CODE = 6;
-const LATEST_APP_VERSION_NAME = '1.0.5';
+const LATEST_APP_VERSION_CODE = 7;
+const LATEST_APP_VERSION_NAME = '1.0.6';
 const APP_DOWNLOAD_URL_PROPERTY = 'PC_DOWNLOAD_URL';
 const ROLE_INSTRUCTOR = 'instructor';
 const ROLE_CADET = 'cadet';
@@ -92,7 +92,7 @@ const HEADERS = Object.freeze({
 const PUBLIC_RESULTS_CANONICAL_HEADERS = Object.freeze([
   'ПІБ курсанта', 'Правильних', 'Неправильних', 'Час проходження', 'Правильних, %',
   'Тест', '_ID курсанта', '_ID результату', 'Стан перевірки', 'Набрано балів', 'Максимум балів', 'Підсумковий бал, %',
-  'Група', 'Дата завершення', 'Результат'
+  'Група', 'Дата завершення', 'Результат', '_Ключ тесту'
 ]);
 const PUBLIC_RESULTS_HEADERS = Object.freeze([
   'ПІБ курсанта', 'Група', 'Тест', 'Дата завершення', 'Результат', 'Підсумковий бал, %',
@@ -111,11 +111,15 @@ var spreadsheetCache_ = null;
 var publicResultsSpreadsheetCache_ = null;
 var publicResultsSheetCache_ = null;
 var publicLayouts_ = [];
+var resultSeriesCache_ = null;
 var testAccessCache_ = null;
 var testAccessGroupsCache_ = null;
 var publicSyncActor_ = null;
 var publicSyncScan_ = null;
 var publicSyncCacheBypass_ = false;
+var deferPublicSync_ = false;
+var deletedRetakeRequest_ = false;
+var deletedRetakeEpochs_ = null;
 
 function doGet() {
   return jsonResponse_({
@@ -124,10 +128,13 @@ function doGet() {
     version: API_VERSION,
     serverBuild: 'pc-api26-dad85abad7c3d093',
     resultDeletion: true,
+    deletedAttemptRetakes: true,
     singleAttempt: true,
     privateLocalStorage: true,
     trainingResume: true,
     publicTableSync: true,
+    fastTestStart: true,
+    deferredResultStats: true,
     testAccess: true,
     newIntake: true,
     reviewPresence: true,
@@ -191,7 +198,10 @@ function setAppDownloadUrl(url, versionCode, versionName) {
 }
 
 function doPost(e) {
+  resultSeriesCache_ = null;
   workspaceMutation_ = null; workspaceWriteRequest_ = false;
+  deferPublicSync_ = false;
+  deletedRetakeRequest_ = false; deletedRetakeEpochs_ = null;
   publicSyncActor_ = null; publicSyncScan_ = null; publicSyncCacheBypass_ = false; publicLayouts_ = [];
   testAccessCache_ = null;
   testAccessGroupsCache_ = null;
@@ -201,6 +211,12 @@ function doPost(e) {
     // Leave room for the envelope around a supported 2.8M-character document.
     if (raw.length > MAX_API_REQUEST_JSON_LENGTH) fail_('Запит перевищує дозволений розмір.', 'PAYLOAD_TOO_LARGE');
     var request = JSON.parse(raw);
+    deletedRetakeRequest_ = Boolean(request && request.retakeProtocol === 1);
+    // Acknowledging answers must not wait for the separately published report.
+    // Older clients retain their original immediate-publication behavior.
+    deferPublicSync_ = request && request.deliveryProtocol === 1 && request.action === 'api'
+      && String(request.method).toUpperCase() === 'POST'
+      && (request.path === '/api/results' || /^\/api\/exam-session\//.test(String(request.path)) || /^\/api\/tests\/[^/]+\/start$/.test(String(request.path)));
     var mutation = requiresWriteLock_(request);
     if (mutation) {
       lock = LockService.getScriptLock();
@@ -225,7 +241,7 @@ function doPost(e) {
       // A bounded worker runs only after authentication and a successful API
       // operation. It uses the same script lock as result/grade mutations.
       try {
-        drainPublicResults_(Boolean(lock), 2);
+        if (!deferPublicSync_) drainPublicResults_(Boolean(lock), 2);
         response.publicTableSync = publicSyncStatus_(publicSyncActor_);
       } catch (syncError) {
         response.publicTableSync = {protocol:1,state:'pending',pendingCount:1,retryAfterSeconds:30};
@@ -341,15 +357,16 @@ function startTraining_(user,id,body,choiceProtocol) {
   }else test=getTestForUser_(id,user,1,choiceProtocol);
   requireSingleAttemptTest_(test);
   if(test.mode!=='training')fail_('Іспит потрібно починати через збережену серверну спробу.','EXAM_SESSION_REQUIRED');
-  if(findResultRecord_(user.id,id)||hasDeletedAttempt_(user.id,id))fail_('Цей тест уже пройдено.','ALREADY_COMPLETED');
+  if(findResultRecord_(user.id,id)||hasDeletedAttempt_(user.id,id)&&!deletedRetakeRequest_)fail_('Цей тест уже пройдено.','ALREADY_COMPLETED');
   if(resume)return {test:test,submissionId:body.submissionId,startPermit:body.startPermit,trainingResumeProtocol:1};
-  var permit=signedDocument_({kind:'training-start',v:1,userId:String(user.id),testId:String(id),submissionId:body.submissionId,startedAt:Date.now()});
+  var permit=signedDocument_({kind:'training-start',v:1,userId:String(user.id),testId:String(id),submissionId:body.submissionId,startedAt:Date.now(),retakeEpoch:deletedRetakeEpoch_(user.id,id,true)});
   return {test:test,submissionId:body.submissionId,startPermit:permit};
 }
 function verifyTrainingPermit_(user,test,submissionId,permit) {
   var value=readSignedDocument_(permit,'INVALID_START_PERMIT');
   if(!value||value.kind!=='training-start'||value.v!==1||value.userId!==String(user.id)||value.testId!==String(test.id)
     ||value.submissionId!==String(submissionId)||!Number.isSafeInteger(value.startedAt)||value.startedAt>Date.now()+5000)fail_('Дозвіл належить іншій спробі. Почніть тест після відкриття інструктором.','INVALID_START_PERMIT');
+  if(hasDeletedAttempt_(user.id,test.id)&&(!deletedRetakeRequest_||!value.retakeEpoch||value.retakeEpoch!==deletedRetakeEpoch_(user.id,test.id,false)))fail_('Попередню роботу видалено. Почніть нову спробу тесту.','RESULT_DELETED');
   return value;
 }
 
@@ -521,14 +538,14 @@ function finishWorkspaceChange_() {
   recoverWorkspaceChange_(true);workspaceMutation_=null;
 }
 function workspaceRevisions_(user,all) {
-  var p=PropertiesService.getScriptProperties(),out={},finger=String(user.id)+':'+user.role+':'+String(user.groupName||'')+':written1';
+  var p=PropertiesService.getScriptProperties(),out={},finger=String(user.id)+':'+user.role+':'+String(user.groupName||'')+':written1:deleted-retakes1:result-series1';
   ['groups','tests','cadets','results','materials','progress'].forEach(function(k){out[k]=(p.getProperty('LK_REV_'+k)||'0')+':'+finger;});
   out.results+=':'+(user.role===ROLE_INSTRUCTOR?(all?'all':'recent'):'own');return out;
 }
 function conditionalWorkspace_(user,body) {
   var all=body.allResults===true,known=body.known||{},before=workspaceRevisions_(user,all),props=PropertiesService.getScriptProperties();
   var busy=props.getProperty('LK_WORKSPACE_WRITE'),changes={},out={workspaceProtocol:1,user:publicUser_(user),revisions:before,changes:changes,
-    capabilities:{singleAttempt:true,resultDeletion:user.role===ROLE_INSTRUCTOR,privateLocalStorage:true,trainingResume:true,testAccess:true,newIntake:true,reviewPresence:true,chunkedTests:true,examRecovery:true,testDeletion:true,multipleChoice:true,examResume:true,pcAccountSync:true,writtenTests:true,conditionalWorkspace:true,listPerformance:true,materials:true,groupArchive:true,bulkAssignment:true,filteredAnalytics:true,cadetTransfer:true,cadetCard:true,formattedReports:true,intakeArchives:true},resultScope:all?'all':'recent',intakeGeneration:props.getProperty('LK_INTAKE_GENERATION')||'0'};
+    capabilities:{fastTestStart:true,deferredResultStats:true,singleAttempt:true,deletedAttemptRetakes:true,resultDeletion:user.role===ROLE_INSTRUCTOR,privateLocalStorage:true,trainingResume:true,testAccess:true,newIntake:true,reviewPresence:true,chunkedTests:true,examRecovery:true,testDeletion:true,multipleChoice:true,examResume:true,pcAccountSync:true,writtenTests:true,conditionalWorkspace:true,listPerformance:true,materials:true,groupArchive:true,bulkAssignment:true,filteredAnalytics:true,cadetTransfer:true,cadetCard:true,formattedReports:true,intakeArchives:true},resultScope:all?'all':'recent',intakeGeneration:props.getProperty('LK_INTAKE_GENERATION')||'0'};
   if(user.role===ROLE_INSTRUCTOR)out.intake=intakeStatus_();
   if(known.groups!==before.groups)changes.groups=listGroups_();
   if(known.tests!==before.tests)changes.tests=listTestsForUser_(user);
@@ -541,7 +558,7 @@ function conditionalWorkspace_(user,body) {
     out.resultTotal=recent?resultCount_():results.length;
     changes.results=results;out.resultsTruncated=results.length<out.resultTotal;
     out.deletedResults=deletedResultRows_(user.role===ROLE_INSTRUCTOR?null:user.id).map(function(row){
-      return user.role===ROLE_INSTRUCTOR?{id:String(row[0])}:{id:String(row[0]),testId:String(row[2])};
+      return user.role===ROLE_INSTRUCTOR?{id:String(row[0])}:{id:String(row[0]),testId:String(row[2]),retakeEpoch:deletedRetakeEpoch_(row[1],row[2])};
     });
     if(user.role===ROLE_CADET)out.examRecoveries=listExamRecoveries_(user,false);
   }
@@ -766,7 +783,7 @@ function createInitialInstructorCode() {
 function ensureSchema_(lockHeld, force) {
   var cache = CacheService.getScriptCache();
   var schemaReady=cache.get('LK_SCHEMA_READY_API25')==='1'&&cache.get('LK_SCHEMA_READY_PUBLIC_CADETS_V1')==='1'&&cache.get('LK_SCHEMA_CADET_CARD_V1')==='1';
-  if(!force&&schemaReady&&cache.get('LK_SCHEMA_EXCEL_V1')==='1')return;
+  if(!force&&schemaReady&&cache.get('LK_SCHEMA_EXCEL_V1')==='1'&&publicReportLayoutReady_())return;
   var ownLock = null;
   if (!lockHeld) {
     ownLock = LockService.getScriptLock();
@@ -890,7 +907,7 @@ function publicResultsSpreadsheet_(createIfMissing) {
   return created;
 }
 
-function publicReportLayoutReady_(){var p=PropertiesService.getScriptProperties(),id=p.getProperty(PUBLIC_RESULTS_PROPERTY);return p.getProperty('LK_EXCEL_LAYOUT_ARMED_V1')==='1'&&(!id||p.getProperty('LK_PUBLIC_LAYOUT_READY_V4_'+id)==='1');}
+function publicReportLayoutReady_(){var p=PropertiesService.getScriptProperties(),id=p.getProperty(PUBLIC_RESULTS_PROPERTY);return p.getProperty('LK_EXCEL_LAYOUT_ARMED_V1')==='1'&&(!id||p.getProperty('LK_PUBLIC_LAYOUT_READY_V4_'+id)==='1'&&p.getProperty('LK_PUBLIC_TEST_KEYS_V1_'+id)==='1');}
 function migratePublicReports_(){
  var props=PropertiesService.getScriptProperties(),id=props.getProperty(PUBLIC_RESULTS_PROPERTY);if(props.getProperty('LK_EXCEL_LAYOUT_ARMED_V1')!=='1'||!id||publicReportLayoutReady_()||Date.now()<Number(props.getProperty('LK_PUBLIC_FORMAT_RETRY_V4')||0))return;
  try{ensurePublicResultsSheet_(SpreadsheetApp.openById(id));props.deleteProperty('LK_PUBLIC_FORMAT_ERROR_V4');props.deleteProperty('LK_PUBLIC_FORMAT_RETRY_V4');}
@@ -934,7 +951,21 @@ function writePublicRows_(sheet,first,rows) {
   if(grew&&layout.modern)formatPublicResults_(sheet);
 }
 function appendPublicRow_(sheet,row){var layout=publicLayout_(sheet),columns=layout.columns,width=Math.max.apply(null,columns)+1,values=Array(width).fill(''),grew=sheet.getLastRow()+1>sheet.getMaxRows();if(grew)sheet.insertRowsAfter(sheet.getMaxRows(),250);columns.forEach(function(column,index){if(column>=0)values[column]=publicPhysicalValue_(index,row[index],layout.modern);});sheet.appendRow(values);if(grew&&layout.modern)formatPublicResults_(sheet);}
-function publicPlaceholder_(user){return [safeCellText_(user.fullName),'','','','','',String(user.id),'','','','','',safeCellText_(user.groupName),'','Не проходив'];}
+function publicPlaceholder_(user){return [safeCellText_(user.fullName),'','','','','',String(user.id),'','','','','',safeCellText_(user.groupName),'','Не проходив',''];}
+// Add one hidden identity column without moving existing data or replaying an
+// old migration backup. Re-running only fills it from authoritative result IDs.
+function ensurePublicTestKeys_(sheet,bookId) {
+  var props=PropertiesService.getScriptProperties(),key='LK_PUBLIC_TEST_KEYS_V1_'+bookId;
+  var headers=sheet.getRange(1,1,1,sheet.getMaxColumns()).getValues()[0].map(String),column=headers.indexOf('_Ключ тесту')+1;
+  if(column&&props.getProperty(key)==='1')return;
+  if(!column){column=sheet.getMaxColumns()+1;sheet.insertColumnsAfter(column-1,1);sheet.getRange(1,column).setValue('_Ключ тесту');}
+  publicLayouts_=publicLayouts_.filter(function(entry){return entry.sheet!==sheet;});
+  var layout=publicLayout_(sheet),count=Math.max(0,sheet.getLastRow()-1),ids=count?sheet.getRange(2,layout.columns[7]+1,count,1).getValues():[],byId=Object.create(null);
+  listResults_(null).forEach(function(result){byId[String(result.id)]=result.canonicalTestId;});
+  if(count){var previous=sheet.getRange(2,column,count,1).getValues();sheet.getRange(2,column,count,1).setValues(ids.map(function(row,index){return [byId[String(row[0])]||previous[index][0]||''];}));}
+  sheet.getRange(1,column,sheet.getMaxRows(),1).setNumberFormat('@');sheet.hideColumns(column,1);
+  props.setProperty(key,'1');
+}
 function ensurePublicResultsSheet_(spreadsheet) {
   var sheet=spreadsheet.getSheetByName(PUBLIC_RESULTS_SHEET);
   if(!sheet){var sheets=spreadsheet.getSheets?spreadsheet.getSheets():[];sheet=sheets.length===1&&sheetIsEmpty_(sheets[0])?sheets[0]:spreadsheet.insertSheet(PUBLIC_RESULTS_SHEET);if(sheet.getName()!==PUBLIC_RESULTS_SHEET)sheet.setName(PUBLIC_RESULTS_SHEET);}
@@ -963,7 +994,7 @@ function ensurePublicResultsSheet_(spreadsheet) {
     var rows=publicRowsFromSheet_(backup||sheet,true).map(function(row){var result=results[String(row[7])];if(result)return publicResultValues_(result);if(!row[7]&&users[String(row[6])]&&row.slice(1,5).every(function(v){return v==='';}))return publicPlaceholder_(users[String(row[6])]);return row;});
     writePublicRows_(sheet,2,rows);
   }
-  formatPublicResults_(sheet);props.setProperty(readyKey,'1');
+  ensurePublicTestKeys_(sheet,spreadsheet.getId());formatPublicResults_(sheet);props.setProperty(readyKey,'1');
   return sheet;
 }
 function ensurePublicFilter_(sheet) {
@@ -1137,6 +1168,13 @@ function repairPublicResults_() {
   var info = resultsSheetInfo_();
   info.synced = true;
   info.resultCount = results.length;
+  // Manual publication must not erase a pending obligation to build statistics.
+  if(flags.some(function(flag){return flag[0]==='pending';})){
+    var pendingIds=resultSheet.getRange(2,1,resultRows,1).getValues();
+    flags.forEach(function(flag,index){var result=resultsById[String(pendingIds[index][0])];
+      if(flag[0]==='pending'&&result)ensureResultAuxiliaries_(result,resultSheet.getRange(index+2,1,1,HEADERS.results.length).getValues()[0]);
+    });
+  }
   if(resultRows)resultSheet.getRange(2,PUBLIC_SYNC_COLUMN,resultRows,1).setValues(flags.map(function(row){
     return row[0]===RESULT_DELETING?row:[''];
   }));
@@ -1158,7 +1196,7 @@ function publicResultValues_(result) {
   var count=result.choiceTotal == null ? result.total : result.choiceTotal;
   return [safeCellText_(result.userName),result.correct,Math.max(0,count-result.correct),
     formatDuration_(result.durationSeconds),count ? Math.round(result.correct*100/count) : '',safeCellText_(result.testTitle),String(result.userId),String(result.id),
-    result.gradingStatus==='pending_review'?'Очікує перевірки':'Перевірено',result.earnedPoints==null?result.correct:result.earnedPoints,result.maxPoints==null?result.total:result.maxPoints,result.score==null?'':result.score,safeCellText_(result.groupName),result.completedAt||'',result.gradingStatus==='pending_review'?'Очікує перевірки':result.passed?'Складено':'Не складено'];
+    result.gradingStatus==='pending_review'?'Очікує перевірки':'Перевірено',result.earnedPoints==null?result.correct:result.earnedPoints,result.maxPoints==null?result.total:result.maxPoints,result.score==null?'':result.score,safeCellText_(result.groupName),result.completedAt||'',result.gradingStatus==='pending_review'?'Очікує перевірки':result.passed?'Складено':'Не складено',result.canonicalTestId||canonicalResultTestId_(result.testId)];
 }
 
 function publicRowMatchesStoredResult_(row, result) {
@@ -1229,13 +1267,17 @@ function publicSyncStatus_(user) {
   var retry=Number(PropertiesService.getScriptProperties().getProperty(PUBLIC_SYNC_RETRY)||0);
   return {protocol:1,state:count?'pending':'synced',pendingCount:count,retryAfterSeconds:count?Math.max(0,Math.ceil((retry-Date.now())/1000)):0};
 }
-function publishCommittedResult_(result,rowNumber) {
+function publishCommittedResult_(result,rowNumber,storedRow) {
   if(cadetDeletionPending_(result.userId))return false;
   var sheet=sheet_('results');
   if(sheet.getRange(rowNumber,PUBLIC_SYNC_COLUMN).getValue()!=='pending')return true;
+  if(deferPublicSync_)return false;
   var properties=PropertiesService.getScriptProperties();
   if(Number(properties.getProperty(PUBLIC_SYNC_RETRY)||0)>Date.now())return false;
-  var synced=tryPublicWrite_(function(){publishVisibleResult_(result);});
+  var synced=tryPublicWrite_(function(){
+    if(storedRow!==false)ensureResultAuxiliaries_(result,storedRow||sheet.getRange(rowNumber,1,1,HEADERS.results.length).getValues()[0]);
+    publishVisibleResult_(result);
+  });
   if(synced) {
     try{sheet.getRange(rowNumber,PUBLIC_SYNC_COLUMN).setValue('');}catch(error){synced=false;}
   }
@@ -1277,7 +1319,7 @@ function drainPublicResults_(lockHeld,limit) {
       }
       var row=sheet.getRange(entry.row,1,1,HEADERS.results.length).getValues()[0];
       if(String(row[0])!==entry.id||row[PUBLIC_SYNC_COLUMN-1]!=='pending')continue;
-      if(!publishCommittedResult_(resultFromRow_(row),entry.row))break;
+      if(!publishCommittedResult_(resultFromRow_(row),entry.row,row))break;
     }
   }finally{if(ownLock)ownLock.releaseLock();}
 }
@@ -1715,12 +1757,14 @@ function listTests_(includeQuestions) {
     rows = sheet.getRange(2, 1, count, HEADERS.tests.length).getValues();
   } else {
     var first = sheet.getRange(2, 1, count, 7).getValues();
-    var tail = sheet.getRange(2, 9, count, 2).getValues();
+    var tail = sheet.getRange(2, 9, count, 3).getValues();
     rows = first.map(function (row, index) { return row.concat([''], tail[index]); });
   }
-  return rows.map(function (row, index) {
+  var tests=rows.map(function (row, index) {
     return testFromRow_(row, index, includeQuestions);
-  }).filter(function (test) { return test.id !== ''; }).sort(function (first, second) {
+  }).filter(function (test) { return test.id !== ''; });
+  var resolve=LKReport_.testSeriesResolver(tests);tests.forEach(function(test){test.canonicalTestId=resolve(test.id);});
+  return tests.sort(function (first, second) {
     return dateMillis_(second.createdAt) - dateMillis_(first.createdAt);
   });
 }
@@ -1741,6 +1785,7 @@ function testFromRow_(row, index, includeQuestions) {
     createdAt: iso_(row[8]),
     rowNumber: index == null ? null : index + 2
   };
+  if(row[10])try{var receipt=JSON.parse(String(row[10]));if(receipt&&receipt.v===1&&typeof receipt.replaces==='string'&&receipt.replaces)test.replacesId=receipt.replaces;}catch(ignored){}
   if (includeQuestions) test.questions = questions;
   return test;
 }
@@ -1830,6 +1875,7 @@ function createTest_(user, body, skipAudit, replacementReceipt) {
     id, safeCellText_(title), safeCellText_(description), mode, duration, passing,
     published, questionStorage, createdAt, questions.length,receipt?JSON.stringify(receipt):''
   ]);
+  resultSeriesCache_=null;
   if (skipAudit !== true) {
     logAudit_(user, 'TEST_CREATE', 'test', id, title,
       questions.length + ' пит.; ' + (published ? 'опубліковано' : 'чернетка') + '.');
@@ -1843,6 +1889,8 @@ function createTest_(user, body, skipAudit, replacementReceipt) {
 
 function replaceTest_(id, user, body) {
   var receipt=testCreationRequest_(user,body,id),replacement=receipt?testCreationReplay_(receipt):null;
+  var replayable=!!receipt;
+  if(!receipt)receipt={v:1,owner:String(user.id),request:'legacy-'+Utilities.getUuid(),digest:sha256Hex_(JSON.stringify(body)),replaces:String(id)};
   var original = getTestById_(id);
   // A receipt remains replayable after the original has already been archived.
   if (!replacement && (!original || isArchivedTest_(original))) fail_('Тест не знайдено.', 'TEST_NOT_FOUND');
@@ -1854,7 +1902,7 @@ function replaceTest_(id, user, body) {
   } catch (error) {
     // Receipt-bearing replacements survive both a lost append acknowledgement
     // and a partial archive write; retry completes the same pair of versions.
-    if(!receipt){
+    if(!replayable){
       try { sheet_('tests').getRange(original.rowNumber, 3).setValue(original.description); } catch (ignored) {}
       try { deleteTestRowOnly_(replacement.id); } catch (ignored) {}
     }
@@ -2054,7 +2102,7 @@ function submitResult_(user, body, examSource, recoveryApproval) {
     if (accepted) return {result: existing, review: safeResultReview_(user, record), practice: safeResultMistakes_(user, existing.id), alreadyAccepted: true,tableSynced:publishCommittedResult_(existing,record.rowNumber)};
     fail_('Цей тест уже пройдено. Повторне проходження недоступне.', 'ALREADY_COMPLETED');
   }
-  requireAttemptNotDeleted_(user.id,body.testId);
+  requireAttemptNotDeleted_(user.id,body.testId,body,examSource?body.retakeEpoch:undefined);
   if(!examSource){var attempt=examDocument_(user).value;if(attempt&&String(attempt.test.id)===String(body.testId))fail_('Продовжіть збережену спробу іспиту.','EXAM_SESSION_REQUIRED');}
   var test = examSource || getTestById_(body.testId);
   requireSingleAttemptTest_(test);
@@ -2105,17 +2153,10 @@ function submitResult_(user, body, examSource, recoveryApproval) {
   invalidatePublicSync_();
   // The result is committed. Failures in auxiliary sheets must not turn an
   // accepted attempt into an apparent failure or cause a duplicate submission.
-  tryAuxiliaryWrite_('Ключ синхронізації', function () {
+  if(!deferPublicSync_)tryAuxiliaryWrite_('Ключ синхронізації', function () {
     sheet_('sync').appendRow([safeCellText_(submissionId || ('result-' + result.id)), 'result:' + result.id, completedAt]);
   });
-  var detailRows = (test.questions || []).filter(function(q){return !isWritten_(q);}).map(function (question) {
-    var right = (question.answers || []).filter(function (answer) { return answer.isCorrect === true; })[0];
-    var selectedId = selected[String(question.id)] || '0';
-    return [
-      result.id, result.userId, result.testId, safeCellText_(result.testTitle), question.id,
-      safeCellText_(String(question.text || '')), choiceCorrect_(question,selectedId), completedAt
-    ];
-  });
+  var detailRows = deferPublicSync_?[]:resultDetailRows_(result,test,selected,completedAt);
   if (detailRows.length) {
     tryAuxiliaryWrite_('Деталі відповідей', function () {
       var detailSheet = sheet_('resultDetails');
@@ -2124,8 +2165,47 @@ function submitResult_(user, body, examSource, recoveryApproval) {
       detailSheet.getRange(startRow, 1, detailRows.length, HEADERS.resultDetails.length).setValues(detailRows);
     });
   }
-  var tableSynced = publishCommittedResult_(result,committedRow);
+  // Older clients already attempted the auxiliary writes above. Keep their
+  // original publication behavior; deferred clients leave the durable flag.
+  var tableSynced = publishCommittedResult_(result,committedRow,false);
   return {result: result, review: buildResultReview_(user, result, test, selected, {}), practice: mistakePractice_(result, test, selected, null), tableSynced: tableSynced};
+}
+
+function resultDetailRows_(result,test,selected,completedAt) {
+  return (test.questions||[]).filter(function(q){return !isWritten_(q);}).map(function(question){
+    return [result.id,result.userId,result.testId,safeCellText_(result.testTitle),question.id,
+      safeCellText_(String(question.text||'')),choiceCorrect_(question,selected[String(question.id)]||'0'),completedAt];
+  });
+}
+// The result row already contains the complete answers and the pending flag.
+// A bounded, authenticated publication worker can rebuild these derived rows
+// after a crash. All callers hold the same lock as deletion and intake cleanup.
+function ensureResultAuxiliaries_(result,row) {
+  if(String(row[0])!==String(result.id)||row[PUBLIC_SYNC_COLUMN-1]!== 'pending')return;
+  var key=String(row[12]||('result-'+result.id)),kind='result:'+String(result.id);
+  if(!dataRows_('sync').some(function(item){return String(item[0])===key&&String(item[1])===kind;}))
+    sheet_('sync').appendRow([safeCellText_(key),kind,new Date(result.completedAt)]);
+  // Historical imports can have a score and old details but no immutable
+  // answer snapshot. Never replace those details with invented empty answers.
+  if(row[13]===''||row[13]==null)return;
+  var selected;try{selected=JSON.parse(String(row[13]||'{}'));}catch(error){fail_('Не вдалося прочитати збережені відповіді для статистики.','RESULT_DATA_INCOMPLETE');}
+  if(!selected||Array.isArray(selected)||typeof selected!=='object')fail_('Некоректний знімок відповідей для статистики.','RESULT_DATA_INCOMPLETE');
+  if(!Object.keys(selected).length)return;
+  var test=getTestById_(result.testId);if(!test)fail_('Не знайдено питання для статистики збереженої роботи.','TEST_DATA_INCOMPLETE');
+  var expected=resultDetailRows_(result,test,selected,new Date(result.completedAt)),wanted=Object.create(null),seen=Object.create(null),remove=[];
+  expected.forEach(function(item){wanted[String(item[4])]=item;});
+  var detailSheet=sheet_('resultDetails');
+  dataRows_('resultDetails').forEach(function(item,index){
+    if(String(item[0])!==String(result.id))return;
+    var qid=String(item[4]),value=wanted[qid];
+    if(!value||seen[qid]){remove.push(index+2);return;}
+    seen[qid]=true;
+    var same=value.every(function(v,i){var old=item[i];return v instanceof Date&&old instanceof Date?v.getTime()===old.getTime():String(v)===String(old);});
+    if(!same)detailSheet.getRange(index+2,1,1,HEADERS.resultDetails.length).setValues([value]);
+  });
+  remove.sort(function(a,b){return b-a;}).forEach(function(number){detailSheet.deleteRow(number);});
+  var missing=expected.filter(function(item){return !seen[String(item[4])];});
+  if(missing.length){var first=detailSheet.getLastRow()+1;ensureRowCapacity_(detailSheet,first+missing.length-1);detailSheet.getRange(first,1,missing.length,HEADERS.resultDetails.length).setValues(missing);}
 }
 
 function examRecoveryFromRow_(row) {
@@ -2244,8 +2324,28 @@ function hasDeletedAttempt_(userId,testId) {
   return deletedResultRows_(userId).some(function(row){return String(row[2])===String(testId);});
 }
 
-function requireAttemptNotDeleted_(userId,testId) {
-  if(hasDeletedAttempt_(userId,testId))fail_('Інструктор видалив результат. Спробу цього тесту вже використано.','RESULT_DELETED');
+// A signed start is bound to the latest deletion, including historical markers.
+// Computing epochs needs no migration or additional persistent state.
+function deletedRetakeEpoch_(userId,testId) {
+  if(!deletedRetakeRequest_)return '';
+  if(!deletedRetakeEpochs_){
+    deletedRetakeEpochs_=Object.create(null);
+    dataRows_('deletedResults').forEach(function(row){if(String(row[0])){
+      var key=JSON.stringify([String(row[1]),String(row[2])]);
+      deletedRetakeEpochs_[key]=sha256Hex_(JSON.stringify([String(row[1]),String(row[2]),String(row[0])]));
+    }});
+  }
+  return deletedRetakeEpochs_[JSON.stringify([String(userId),String(testId)])]||'';
+}
+
+function requireAttemptNotDeleted_(userId,testId,body,trustedEpoch) {
+  if(!hasDeletedAttempt_(userId,testId))return;
+  if(deletedRetakeRequest_&&body){
+    var epoch=deletedRetakeEpoch_(userId,testId,false);
+    if(epoch&&trustedEpoch===epoch)return;
+    if(epoch&&body.startPermit){var permit=readSignedDocument_(body.startPermit,'INVALID_START_PERMIT');if(permit.retakeEpoch===epoch&&permit.userId===String(userId)&&permit.testId===String(testId)&&permit.submissionId===String(body.submissionId))return;}
+  }
+  fail_('Інструктор видалив попередню роботу. Почніть нову спробу тесту.','RESULT_DELETED');
 }
 
 function plannedRowNumbers_(rows,predicate) {
@@ -2347,6 +2447,7 @@ function deleteResult_(actor,id,body) {
   try{
     plans.forEach(function(item){if(item.rows.length)deleteSheetRows_(item.sheet,item.rows);});
     if(owner&&tables.public)addVisibleCadetPlaceholder_(owner);
+    if(owner)PropertiesService.getScriptProperties().setProperty('LK_PC_STATE_'+userId,Utilities.getUuid());
     PropertiesService.getScriptProperties().deleteProperty(reviewLeaseKey_(id));
     if(!marker)sheet_('deletedResults').appendRow([result.id,result.userId,result.testId]);
     deleteSheetRows_(results,[record.rowNumber]);
@@ -2355,14 +2456,22 @@ function deleteResult_(actor,id,body) {
     fail_('Не вдалося завершити видалення. Повторіть «Видалити результат».','RESULT_DELETION_PENDING');
   }
   invalidatePublicSync_();
-  logAudit_(actor,'RESULT_DELETE','result',id,'','Видалено результат. Спробу тесту залишено використаною.');
+  logAudit_(actor,'RESULT_DELETE','result',id,'',deletedRetakeRequest_?'Видалено результат. Доступна нова спроба тесту.':'Видалено результат. Спробу тесту залишено використаною.');
   return {deleted:true,resultId:id,alreadyDeleted:false};
 }
 
+function canonicalResultTestId_(id) {
+  if(!resultSeriesCache_){
+    var tests=listTests_(false);
+    listRetries_().forEach(function(retry){if(retry.retryTestId&&retry.sourceTestId)tests.push({id:retry.retryTestId,replacesId:String(retry.sourceTestId)});});
+    resultSeriesCache_=LKReport_.testSeriesResolver(tests);
+  }
+  return resultSeriesCache_(id);
+}
 function resultFromRow_(row) {
   return {
     id: row[0], userId: row[1], userName: String(row[2] || ''), groupName: String(row[3] || ''),
-    testId: row[4], testTitle: String(row[5] || ''), score: row[16] === 'pending_review' ? null : Number(row[6] || 0),
+    testId: row[4], canonicalTestId:canonicalResultTestId_(row[4]), testTitle: String(row[5] || ''), score: row[16] === 'pending_review' ? null : Number(row[6] || 0),
     correct: Number(row[7] || 0), total: Number(row[8] || 0), durationSeconds: Number(row[9] || 0),
     completedAt: iso_(row[10]), passed: row[16] === 'pending_review' ? null : asBoolean_(row[11], false),
     examExitCount: Number(row[14] || 0), examPinned: asBoolean_(row[15], false),
@@ -3751,7 +3860,7 @@ function pcStateValidate_(user,key,value) {
     Object.keys(value.items).forEach(function(id){var item=value.items[id];if(!item||String(item.points==null?'':item.points).length>4||typeof item.comment!=='string'||item.comment.length>1000)fail_('Некоректні бали або коментар.','BAD_REQUEST');});
   }else{
     if(!value.test||value.test.mode!=='training'||!value.test.id||!value.submissionId||!value.answers||typeof value.answers!=='object'||!Array.isArray(value.test.questions)||value.test.questions.length>200)fail_('Між ПК можна продовжувати лише тренування. Іспит завершується на початковому ПК.','BAD_REQUEST');
-    requireAttemptNotDeleted_(user.id,value.test.id);
+    requireAttemptNotDeleted_(user.id,value.test.id,value);
     var test;
     if(value.startPermit){test=getTestById_(String(value.test.id));if(!test||!test.published||isArchivedTest_(test)||!visibleTestForUser_(test,user))fail_('Тренування більше недоступне.','NOT_FOUND');verifyTrainingPermit_(user,test,value.submissionId,value.startPermit);}
     else test=getTestForUser_(String(value.test.id),user,1,2);
@@ -3891,7 +4000,7 @@ function examCheckpoint_(attempt,checkpoint) {
 function examFinalize_(user,doc) {
   var v=doc.value;
   if(v.status==='active'){v.status='finishing';v.finishedAt=Math.min(Date.now(),v.deadline);doc=examWrite_(user,doc,v);}
-  var body={writtenProtocol:1,choiceProtocol:2,testId:v.test.id,submissionId:v.submissionId,durationSeconds:Math.max(1,Math.ceil((v.finishedAt-v.startedAt)/1000)),examExitCount:v.exitCount||0,answers:v.test.questions.map(function(q){return isWritten_(q)?{questionId:q.id,text:v.answers[String(q.id)]||''}:Array.isArray(v.answers[String(q.id)])?{questionId:q.id,answerIds:v.answers[String(q.id)]}:{questionId:q.id,answerId:v.answers[String(q.id)]||'0'};})};
+  var body={writtenProtocol:1,choiceProtocol:2,testId:v.test.id,submissionId:v.submissionId,retakeEpoch:v.retakeEpoch,durationSeconds:Math.max(1,Math.ceil((v.finishedAt-v.startedAt)/1000)),examExitCount:v.exitCount||0,answers:v.test.questions.map(function(q){return isWritten_(q)?{questionId:q.id,text:v.answers[String(q.id)]||''}:Array.isArray(v.answers[String(q.id)])?{questionId:q.id,answerIds:v.answers[String(q.id)]}:{questionId:q.id,answerId:v.answers[String(q.id)]||'0'};})};
   beginWorkspaceChange_(['results']);
   var completion=submitResult_(user,body,v.sourceTest);
   if(v.status!=='completed'){v.status='completed';doc=examWrite_(user,doc,v);}
@@ -3903,7 +4012,11 @@ function routeExam_(method,path,body,user,choiceProtocol) {
   var doc=examDocument_(user),v=doc.value;
   if(v&&v.status!=='completed')requireSingleAttemptTest_(v.sourceTest||v.test);
   if(v&&v.status!=='completed')requireChoiceProtocol_(v.sourceTest||v.test,choiceProtocol);
-  if(method==='GET'&&path==='/api/exam-session')return examReply_(user,doc);
+  if(method==='GET'&&path==='/api/exam-session'){
+    var reply=examReply_(user,doc);
+    if(!v&&deletedRetakeRequest_&&body.knownTestId&&hasDeletedAttempt_(user.id,body.knownTestId)){reply.attemptDeleted=true;reply.deletedTestId=String(body.knownTestId);}
+    return reply;
+  }
   if(method!=='POST')fail_('Дію не знайдено.','NOT_FOUND');
   var device=examIdentifier_(body.deviceId),request=examIdentifier_(body.requestId);
   if(path==='/api/exam-session/start'){
@@ -3916,10 +4029,11 @@ function routeExam_(method,path,body,user,choiceProtocol) {
     if(!test||test.mode!=='exam'||!test.published||isArchivedTest_(test)||!visibleTestForUser_(test,user))fail_('Іспит недоступний.','TEST_NOT_FOUND');
     requireTestOpen_(test,user);
     requireChoiceProtocol_(test,choiceProtocol);
-    if(findResultRecord_(user.id,test.id)||hasDeletedAttempt_(user.id,test.id))fail_('Цей іспит уже завершено.','ALREADY_COMPLETED');
+    if(findResultRecord_(user.id,test.id)||hasDeletedAttempt_(user.id,test.id)&&!deletedRetakeRequest_)fail_('Цей іспит уже завершено.','ALREADY_COMPLETED');
     if(listExamRecoveries_(user,false).some(function(x){return String(x.testId)===String(test.id);}))fail_('Збережена робота чекає підтвердження інструктора.','EXAM_RECOVERY_PENDING');
     var now=Date.now(),elapsed=0;
     v={status:'active',test:sanitizeTestForCadet_(test),sourceTest:test,submissionId:'exam-'+Utilities.getUuid(),startedAt:now-elapsed,deadline:now-elapsed+test.durationMinutes*60000,ownerId:device,fence:1,claimId:request,answers:{},index:0,exitCount:0};
+    v.retakeEpoch=deletedRetakeEpoch_(user.id,test.id,true);
     // Shuffle once on the server; every PC receives exactly the same order.
     var random=String(test.description||'').match(/\[\[LK-RANDOM:([^\]]*)\]\]/),settings=random?random[1]:null;
     function shuffle(items){for(var i=items.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),item=items[i];items[i]=items[j];items[j]=item;}}
@@ -3927,7 +4041,10 @@ function routeExam_(method,path,body,user,choiceProtocol) {
     if(settings===null||settings.indexOf('A')>=0)v.test.questions.forEach(function(q){shuffle(q.answers);});
     return examReply_(user,examWrite_(user,doc,v,request));
   }
-  if(!v||String(body.submissionId)!==v.submissionId)fail_('Спробу вже змінено. Оновіть дані акаунта.','EXAM_REPLACED');
+  if(!v||String(body.submissionId)!==v.submissionId){
+    if(deletedRetakeRequest_&&body.testId&&hasDeletedAttempt_(user.id,body.testId))fail_('Попередню роботу видалено. Доступна нова спроба тесту.','RESULT_DELETED');
+    fail_('Спробу вже змінено. Оновіть дані акаунта.','EXAM_REPLACED');
+  }
   if(v.status==='completed')return examReply_(user,doc);
   if(path==='/api/exam-session/claim'){
     if(v.status==='finishing'||Date.now()>=v.deadline)return examFinalize_(user,doc);
@@ -3980,7 +4097,7 @@ function instructorReportData_(actor,body,options) {
   requireRole_(actor,ROLE_INSTRUCTOR);body=body||{};options=options||{};
   if(!options.allowIntake&&PropertiesService.getScriptProperties().getProperty('LK_INTAKE_ACTIVE'))fail_('Триває підготовка набору. Завантажте збережений архів або дочекайтеся завершення.','INTAKE_IN_PROGRESS');
   var revision=JSON.stringify(workspaceRevisions_(actor,true)),groups=listGroups_(),results=listResults_(null),cadets=listUsers_().filter(function(u){return u.role===ROLE_CADET&&!cadetDeletionPending_(u.id);}).map(publicUser_);
-  var tests=listTests_(false).filter(function(t){return !isArchivedTest_(t)&&!isRetakeTest_(t);}).map(function(t){var assigned=assignedGroups_(t.description);return {id:String(t.id),title:t.title,published:t.published&&assigned!==null,assignedGroups:assigned||[]};});
+  var tests=listTests_(false).filter(function(t){return !isArchivedTest_(t)&&!isRetakeTest_(t);}).map(function(t){var assigned=assignedGroups_(t.description);return {id:String(t.id),canonicalTestId:t.canonicalTestId,title:t.title,published:t.published&&assigned!==null,assignedGroups:assigned||[]};});
   var groupId=cleanText_(body.groupId,100),testId=cleanText_(body.testId,100),query=normalize_(cleanText_(body.query,180)),scope=[];
   if(groupId){var group=groups.filter(function(g){return String(g.id)===groupId;})[0];if(!group)fail_('Групу більше не знайдено. Оновіть фільтри.','GROUP_NOT_FOUND');results=results.filter(function(r){return r.groupName===group.name;});cadets=cadets.filter(function(u){return u.groupName===group.name;});tests=tests.filter(function(t){return !t.assignedGroups.length||t.assignedGroups.indexOf(group.name)>=0||results.some(function(r){return String(r.testId)===t.id;});});scope.push(group.name);}
   if(testId){var test=tests.filter(function(t){return t.id===testId;})[0],historical=results.filter(function(r){return String(r.testId)===testId;})[0];if(!test&&!historical)fail_('Тест більше не знайдено. Оновіть фільтри.','TEST_NOT_FOUND');results=results.filter(function(r){return String(r.testId)===testId;});tests=test?[test]:[{id:testId,title:historical.testTitle,historical:true}];scope.push((test||historical).title||historical.testTitle);}
@@ -4055,6 +4172,39 @@ function intakeArchiveContent_(body) {
 
 // BEGIN GENERATED EXCEL REPORT
 var LKReport_=(function(){
+// A replacement is another version of the same test. A separately created
+// test keeps its own identity, even when its title happens to be identical.
+const identity=value=>String(value??'');
+function testSeriesResolver(tests=[]) {
+ const parents=new Map();
+ for(const test of tests)if(identity(test.id))parents.set(identity(test.id),identity(test.canonicalTestId||test.replacesId||test.id));
+ return value=>{
+  let current=identity(value);const seen=new Set();
+  while(parents.has(current)&&parents.get(current)!==current){
+   if(seen.has(current))return identity(value); // Never merge corrupt cycles.
+   seen.add(current);current=parents.get(current);
+  }
+  return current;
+ };
+}
+function resultTestKey(result,resolve=value=>identity(value)) {
+ return resolve(result.canonicalTestId||result.testId);
+}
+function compareAttempts(a,b) {
+ return (Date.parse(a.completedAt)||0)-(Date.parse(b.completedAt)||0)
+  ||identity(a.id).localeCompare(identity(b.id),'en',{numeric:true});
+}
+function latestResults(results,tests=[],{byGroup=true}={}) {
+ const resolve=testSeriesResolver(tests),latest=new Map();
+ for(const result of results){
+  if(!result||!identity(result.userId)||!identity(result.testId))continue;
+  const key=JSON.stringify([identity(result.userId),byGroup?String(result.groupName||''):'',resultTestKey(result,resolve)]);
+  const previous=latest.get(key);
+  if(!previous||compareAttempts(result,previous)>0)latest.set(key,result);
+ }
+ return [...latest.values()].sort((a,b)=>compareAttempts(b,a));
+}
+
 // The same report model and XML run in the browser and in Apps Script.
 // Values are written as numbers or explicit strings; cell text is never a formula.
 const rptMime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -4088,11 +4238,11 @@ function reportModel(data,options={}){
  const columns=[['ПІБ курсанта',34],['Група',20],['Тест',38],['Дата завершення',22],['Результат',24],['Підсумковий бал',20],['Набрано балів',17],['Максимум балів',18],['Час проходження',18],['Правильних',16,true],['Неправильних',17,true],['Правильних, %',19,true],['ID курсанта',18,true],['ID результату',18,true],['Підтвердження збереженої роботи',38]];
  const ordered=results.slice().sort((a,b)=>(Date.parse(b.completedAt)||0)-(Date.parse(a.completedAt)||0)||rptSort(a.userName,b.userName));
  const resultRows=ordered.map(r=>{const state=rptPending(r)?7:r.passed?5:6,choice=rptChoice(r);return [r.userName,r.groupName,r.testTitle,rptCell(rptDate(r.completedAt,offset),4),rptCell(rptStatus(r),state),rptPercent(rptScore(r),state===7?2:r.passed?12:13),rptNumber(r.earnedPoints)??r.correct,rptNumber(r.maxPoints)??r.total,rptCell(rptTime(r.durationSeconds),3),choice?r.correct:'',choice?Math.max(0,choice-r.correct):'',rptPercent(choice?(Number(r.correct)||0)/choice:null),rptId(r.userId),rptId(r.id),r.examRecovered?'Підтвердив: '+(r.recoveredBy||'інструктор')+'; час зі збереженої роботи':''];});
- const byTest=new Map(),members=new Map(),latest=new Map();
- for(const t of tests)if(t&&rptId(t.id))byTest.set(rptId(t.id),t);
+ const resolve=testSeriesResolver(tests),current=latestResults(results,tests),byTest=new Map(),members=new Map(),latest=new Map();
+ for(const t of tests)if(t&&rptId(t.id))byTest.set(resolve(t.id),{...t,id:resolve(t.id)});
  for(const u of cadets){if(u.role&&u.role!=='cadet')continue;const group=String(u.groupName||'');members.set(JSON.stringify([rptId(u.id),group]),{id:rptId(u.id),name:u.fullName||u.username||'',username:u.username||'',group});}
- for(const r of ordered){
-  const tid=rptId(r.testId),person=JSON.stringify([rptId(r.userId),String(r.groupName||'')]);
+ for(const r of current){
+  const tid=resultTestKey(r,resolve),person=JSON.stringify([rptId(r.userId),String(r.groupName||'')]);
   if(!byTest.has(tid))byTest.set(tid,{id:tid,title:r.testTitle,historical:true});
   if(!members.has(person))members.set(person,{id:rptId(r.userId),name:r.userName,group:String(r.groupName||''),historical:true});
   const key=JSON.stringify([person,tid]);if(!latest.has(key))latest.set(key,r);
@@ -4172,6 +4322,6 @@ function zipReportParts(parts){
 }
 const XLSX_MIME=rptMime;
 
-return {reportModel:reportModel,xlsxParts:xlsxParts,reportFilename:reportFilename};
+return {reportModel:reportModel,xlsxParts:xlsxParts,reportFilename:reportFilename,testSeriesResolver:testSeriesResolver};
 })();
 // END GENERATED EXCEL REPORT

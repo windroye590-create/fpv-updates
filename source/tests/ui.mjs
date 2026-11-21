@@ -35,7 +35,7 @@ const server=http.createServer(async(req,res)=>{
    res.setHeader('Content-Type','application/json');res.end(reply);return;
   }
   const name=url.pathname==='/'?'index.html':url.pathname.slice(1),file=new URL('../web/'+name,import.meta.url);
-  if(!['excel-report.js','secure-storage.js','boot.js','public-table-sync.js','review-presence.js','results.js','exam-session.js','account-sync.js','learning.js','workspace.js','durability.js','updater.js','materials.js','cadet-card.js','office-import.js','test-import-sample.docx','test-import-sample.xlsx','index.html','app.js','core.js','statement.js','vendor/jspdf.umd.min.js','statement-font.ttf','style.css','icon.png'].includes(name)&&!name.startsWith('vendor/pdfjs/')){res.writeHead(404);res.end();return;}
+  if(!['result-attempts.js','excel-report.js','secure-storage.js','boot.js','public-table-sync.js','review-presence.js','results.js','exam-session.js','account-sync.js','learning.js','workspace.js','durability.js','updater.js','materials.js','cadet-card.js','office-import.js','test-import-sample.docx','test-import-sample.xlsx','index.html','app.js','core.js','statement.js','vendor/jspdf.umd.min.js','statement-font.ttf','style.css','icon.png'].includes(name)&&!name.startsWith('vendor/pdfjs/')){res.writeHead(404);res.end();return;}
   const ext=name.substring(name.lastIndexOf('.'));res.setHeader('Content-Type',mime[ext]);res.end(fs.readFileSync(file));
  }catch(x){res.writeHead(500);res.end(String(x));}
 });

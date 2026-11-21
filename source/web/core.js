@@ -1,4 +1,4 @@
-export const APP_VERSION='1.0.5';
+export const APP_VERSION='1.0.6';
 export const PREVIEW_BUILD=false;
 // Suspended browser timers must not stop the EXE. Closing is an explicit event.
 export function createHostWindow({local,beacon,key,windowId,alive,updating}){
@@ -35,19 +35,40 @@ export async function keyFor(password,salt){
 }
 export async function credential(password){const salt=b64(crypto.getRandomValues(new Uint8Array(16)));return {passwordSalt:salt,passwordHash:b64(await keyFor(password,salt))};}
 export async function proof(password,salt,nonce){const key=await crypto.subtle.importKey('raw',await keyFor(password,salt),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',key,bytes(nonce)));}
-export async function signIn(username,password,groupName,request,pause=()=>new Promise(resolve=>setTimeout(resolve,400))){
+export async function signIn(username,password,groupName,request,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random){
  const transient=new Set(['CHALLENGE_EXPIRED','NETWORK','TIMEOUT','BUSY','HTTP_408','HTTP_429','HTTP_500','HTTP_502','HTTP_503','HTTP_504']);
- for(let attempt=0;attempt<2;attempt++){
+ for(let attempt=0;attempt<7;attempt++){
   try{
    const identity={username:username.trim(),groupName};
    const challenge=await request('/api/challenge',identity);
    if(typeof challenge.salt!=='string'||!challenge.salt||typeof challenge.nonce!=='string'||!challenge.nonce)throw Object.assign(Error('Сервер не повернув дані для безпечного входу.'),{code:'BAD_LOGIN_RESPONSE'});
    const value=await proof(password,challenge.salt,challenge.nonce);
    return await request('/api/login',{...identity,nonce:challenge.nonce,proof:value});
-  }catch(error){if(attempt!==0||!transient.has(error.code))throw error;await pause();}
+  }catch(error){if(attempt>=(['NETWORK','TIMEOUT'].includes(error.code)?1:6)||!transient.has(error.code))throw error;const cap=Math.min(1500*2**attempt,10000);await pause(Math.round(cap*(.5+random()*.5)));}
  }
 }
-export function payload(method,path,token='',body={}){if(!['GET','POST','DELETE'].includes(method)||!path.startsWith('/api/')||path.includes('..'))throw Error('Некоректний запит');return {action:'api',method,path,token,body,writtenProtocol:1,choiceProtocol:2,testAccessProtocol:1};}
+export function payload(method,path,token='',body={}){if(!['GET','POST','DELETE'].includes(method)||!path.startsWith('/api/')||path.includes('..'))throw Error('Некоректний запит');return {action:'api',method,path,token,body,writtenProtocol:1,choiceProtocol:2,testAccessProtocol:1,deliveryProtocol:1,retakeProtocol:1};}
+export async function requestCapacity(request,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random){
+ for(let attempt=0;;attempt++){
+  const reply=await request();
+  if(reply?.ok!==false||!['BUSY','HTTP_429'].includes(reply.code)||attempt>=4)return reply;
+  const cap=Math.min(1500*2**attempt,8000);await pause(Math.round(cap*(.5+random()*.5)));
+ }
+}
+export function resetDeletedTraining(a,deletions){
+ const stale=value=>{
+  if(value?.test?.mode!=='training')return false;
+  const deleted=deletions.find(item=>String(item.testId)===String(value.test.id));if(!deleted)return false;
+  let epoch='';try{epoch=JSON.parse(new TextDecoder().decode(unb64(value.startPermit.split('.')[0]))).retakeEpoch||'';}catch{}
+  return !deleted.retakeEpoch||epoch!==deleted.retakeEpoch;
+ };
+ const oldRun=stale(a.run),oldShadow=stale(a.pcSync?.shadow?.training);
+ if(oldRun){a.retakeBackups??=[];a.retakeBackups.unshift(JSON.parse(JSON.stringify(a.run)));a.retakeBackups=a.retakeBackups.slice(0,5);a.run=null;}
+ if(oldRun||oldShadow){
+  const s=a.pcSync;if(s){delete s.revisions?.training;if(s.shadow)s.shadow.training=null;delete s.requests?.training;delete s.conflicts?.training;s.cursor='';}
+ }
+ return oldRun;
+}
 export function marker(description,name){return String(description??'').match(new RegExp('\\[\\[LK-'+name+':(.*?)\\]\\]'))?.[1]??'';}
 export function cleanDescription(d){return String(d??'').replace(/\[\[LK-(?:GROUPS|RANDOM|RETRY|PC-WRITTEN|PC-MULTICHOICE):.*?\]\]\n?/g,'').replace(/\[\[LK-ARCHIVED\]\]/g,'').trim();}
 export function groupsFrom(d,strict=false){
@@ -142,7 +163,8 @@ export function enrichReview(rows,test){
   return {...row,questionText:row.questionText||q?.text||'',selectedAnswerIds:selected,correctAnswerIds:correct,selectedAnswerText:row.selectedAnswerText||(selected.length?text(selected):'Без відповіді'),correctAnswerText:row.correctAnswerText||text(correct)||'Відповідь недоступна'};
  });
 }
-export function retryable(code){return ['NETWORK','TIMEOUT','BUSY','HTTP_408','HTTP_429','HTTP_500','HTTP_502','HTTP_503','HTTP_AUTH','SERVER_ERROR','EMPTY','BAD_JSON','BAD_RESULT_RESPONSE','RESULT_DELETION_PENDING'].includes(code);}
+export function retryable(code){return ['NETWORK','LOCAL_HOST_UNAVAILABLE','TIMEOUT','BUSY','HTTP_408','HTTP_429','HTTP_500','HTTP_502','HTTP_503','HTTP_AUTH','SERVER_ERROR','EMPTY','BAD_JSON','BAD_RESULT_RESPONSE','RESULT_DELETION_PENDING'].includes(code);}
+export function canRetrySubmission(p){return !p.permanent||retryable(p.failureCode);}
 export function retryDelay(n,random=Math.random){const cap=Math.min(10000*2**Math.min(Math.max(n-1,0),5),300000);return Math.round(cap*(.5+random()*.5));}
 export function mergeResults(a,b){return [...new Map([...a,...b].map(r=>[id(r.id),r])).values()].sort((x,y)=>Date.parse(y.completedAt)-Date.parse(x.completedAt));}
 export function completed(testId,results,pending,run,deletedTests=[]){return deletedTests.includes(id(testId))||results.some(r=>id(r.testId)===id(testId))||pending.some(p=>id(p.body.testId)===id(testId))||(run&&id(run.test.id)===id(testId));}

@@ -1,11 +1,11 @@
 {
   "name": "fpv-komisiia-pc",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:host && node tests/no-retakes.mjs && node tests/result-deletion.mjs && node tests/cadet-deletion.mjs && node tests/contract.mjs && node tests/flows.mjs && node tests/written.mjs && node tests/written-reliability.mjs && node tests/review-audit.mjs && node tests/menu-status.mjs && node tests/session-transitions.mjs && node tests/session-views.mjs && node tests/json-import-safety.mjs && node tests/pc-only.mjs && node tests/auth-recovery.mjs && node tests/login-capacity.mjs && node tests/results.mjs && node tests/large-tests.mjs && node tests/recent-results.mjs && node tests/review-presence.mjs && node tests/test-access-intake.mjs && node tests/public-table-sync.mjs && npm run test:storage-recovery && npm run test:private-storage && npm run test:audit && npm run test:reliability && node tests/cadet-card.mjs && node tests/data-update.mjs && node tests/analytics-requests.mjs && node tests/excel-report.mjs && node tests/public-sheet-v4.mjs && node tests/excel-server.mjs && node tests/commission-owner.mjs",
-    "test:ui": "npm run test:pdf-ui && npm run test:host-ui && node tests/ui.mjs && node tests/private-storage-ui.mjs && node tests/excel-report-ui.mjs && node tests/cadet-card-ui.mjs && node tests/section-filters-ui.mjs && node tests/materials-ui.mjs && node tests/written-ui.mjs && node tests/results-ui.mjs && node tests/office.mjs && node tests/responsive-ui.mjs && node tests/updates-ui.mjs && node tests/instructors-ui.mjs && node tests/performance-ui.mjs && node tests/large-tests-ui.mjs && node tests/review-presence-ui.mjs && node tests/test-access-intake-ui.mjs && node tests/public-table-sync-ui.mjs",
+    "test": "npm run test:host && node tests/no-retakes.mjs && node tests/result-deletion.mjs && node tests/cadet-deletion.mjs && node tests/contract.mjs && node tests/flows.mjs && node tests/written.mjs && node tests/written-reliability.mjs && node tests/review-audit.mjs && node tests/menu-status.mjs && node tests/session-transitions.mjs && node tests/session-views.mjs && node tests/json-import-safety.mjs && node tests/pc-only.mjs && node tests/auth-recovery.mjs && node tests/login-capacity.mjs && node tests/classroom-delivery.mjs && node tests/start-finish-performance.mjs && node tests/finish-delivery-reliability.mjs && node tests/deleted-retakes.mjs && node tests/results.mjs && node tests/retake-ranking.mjs && node tests/large-tests.mjs && node tests/recent-results.mjs && node tests/review-presence.mjs && node tests/test-access-intake.mjs && node tests/public-table-sync.mjs && npm run test:storage-recovery && npm run test:private-storage && npm run test:audit && npm run test:reliability && node tests/cadet-card.mjs && node tests/data-update.mjs && node tests/analytics-requests.mjs && node tests/excel-report.mjs && node tests/public-sheet-v4.mjs && node tests/excel-server.mjs && node tests/commission-owner.mjs",
+    "test:ui": "npm run test:pdf-ui && npm run test:host-ui && node tests/ui.mjs && node tests/private-storage-ui.mjs && node tests/excel-report-ui.mjs && node tests/cadet-card-ui.mjs && node tests/section-filters-ui.mjs && node tests/materials-ui.mjs && node tests/written-ui.mjs && node tests/finish-delivery-ui.mjs && node tests/start-finish-performance-ui.mjs && node tests/results-ui.mjs && node tests/office.mjs && node tests/responsive-ui.mjs && node tests/updates-ui.mjs && node tests/instructors-ui.mjs && node tests/performance-ui.mjs && node tests/large-tests-ui.mjs && node tests/review-presence-ui.mjs && node tests/test-access-intake-ui.mjs && node tests/public-table-sync-ui.mjs",
     "build": "python3 build_windows.py",
     "test:office": "node tests/office.mjs",
     "test:materials": "node tests/materials-server.mjs",
@@ -41,5 +41,5 @@
     "playwright": "1.62.1"
   },
   "executableName": "FPV-Komisiia-PC.exe",
-  "versionCode": 6
+  "versionCode": 7
 }

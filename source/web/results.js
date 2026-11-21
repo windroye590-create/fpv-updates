@@ -1,4 +1,5 @@
 import {esc, id, nameOf, choiceCount, pendingReview, resultLabel, groupsFrom, marker} from './core.js';
+import {latestResults,testSeriesResolver,resultTestKey,compareAttempts} from './result-attempts.js';
 
 // Only automatically checked choice questions contribute to the group ranking.
 // Written points and the final percentage remain part of the individual work.
@@ -19,10 +20,10 @@ export function compactResults(rows,{instructor=false,allowDelete=false,groupSel
 }
 
 const compare=(a,b)=>String(a).localeCompare(String(b),'uk');
-const newer=(a,b)=>(Date.parse(a.completedAt)||0)-(Date.parse(b.completedAt)||0)||compare(id(a.id),id(b.id));
+const newer=compareAttempts;
 
 export function buildRanking(source,groupName) {
- const results=(source.results||[]).filter(r=>r.groupName===groupName&&id(r.userId)&&id(r.testId));
+ const resolve=testSeriesResolver(source.tests),results=latestResults(source.results||[],source.tests).filter(r=>r.groupName===groupName);
  const members=new Map();
  for(const u of source.cadets||[])if(u.role==='cadet'&&u.groupName===groupName&&id(u.id)&&!members.has(id(u.id)))
   members.set(id(u.id),{userId:id(u.id),name:nameOf(u),username:u.username||'',historical:false,attempts:new Map()});
@@ -33,12 +34,12 @@ export function buildRanking(source,groupName) {
  for(const t of source.tests||[]) {
   const assigned=groupsFrom(t.description);
   if(id(t.id)&&t.published!==false&&!marker(t.description,'RETRY')&&(!assigned.length||assigned.includes(groupName)))
-   tests.set(id(t.id),{id:id(t.id),title:t.title||'Тест'});
+   tests.set(resolve(t.id),{id:resolve(t.id),title:t.title||'Тест'});
  }
  for(const r of results) {
-  if(!tests.has(id(r.testId)))tests.set(id(r.testId),{id:id(r.testId),title:r.testTitle||'Тест'});
-  const attempts=members.get(id(r.userId)).attempts,previous=attempts.get(id(r.testId));
-  if(!previous||newer(r,previous)>0)attempts.set(id(r.testId),r);
+  const key=resultTestKey(r,resolve);
+  if(!tests.has(key))tests.set(key,{id:key,title:r.testTitle||'Тест'});
+  members.get(id(r.userId)).attempts.set(key,r);
  }
  const columns=[...tests.values()].sort((a,b)=>compare(a.title,b.title)||compare(a.id,b.id));
  const rows=[...members.values()].map(row=>{

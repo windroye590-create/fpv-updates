@@ -73,6 +73,8 @@ jobs:
           node tests/results-ui.mjs
           node tests/materials-ui.mjs
           node tests/written-ui.mjs
+          node tests/finish-delivery-ui.mjs
+          node tests/start-finish-performance-ui.mjs
           node tests/review-presence-ui.mjs
           node tests/responsive-ui.mjs
           node tests/ui.mjs

@@ -6,7 +6,7 @@ const transient=code=>['NETWORK','TIMEOUT','BUSY','STATE_BUSY','SERVER_ERROR','H
 
 // Each computer keeps the last acknowledged value and revision. A remote write
 // can replace a clean local copy, never an unacknowledged local change.
-export function createAccountSync({session,account,snapshot,apply,rpc,persist,changed=()=>{},now=Date.now,uuid=()=>crypto.randomUUID(),delay=3000}){
+export function createAccountSync({session,account,snapshot,apply,rpc,persist,changed=()=>{},now=Date.now,uuid=()=>crypto.randomUUID(),delay=3000,pollInterval=0,canSync=()=>true}){
  let generation=0,readyToken='',running=null,timer=null,busy=false,error='',unsupported=false,lastAt=0,retryAt=0;
  const owner=()=>session()?{...session(),generation}:null;
  const current=s=>s&&s.generation===generation&&session()?.token===s.token&&String(session()?.user?.id)===String(s.user.id);
@@ -69,7 +69,7 @@ export function createAccountSync({session,account,snapshot,apply,rpc,persist,ch
  }
  async function work(force){
   const s=owner();if(!s)return;const a=account(),st=state(a);
-  if(!force&&now()<retryAt)return;
+  if(!force&&(!canSync()||now()<retryAt||readyToken===s.token&&now()-lastAt<pollInterval))return;
   busy=true;error='';notify();
   try{
    await pull(s,a,force||readyToken!==s.token);

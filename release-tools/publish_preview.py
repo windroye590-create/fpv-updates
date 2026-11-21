@@ -14,7 +14,7 @@ def publish(client, bundle, extras, tag, commit, notes):
     previous = release.ensure_newer(client, bundle, ROOT / 'release-tools/update-public.pem')
     candidate = client.find(tag) or client.request('POST', '/releases', {
         'tag_name': tag, 'target_commitish': commit,
-        'name': 'Попередній перегляд: результати та перевірка · ' + bundle.version,
+        'name': 'FPV Комісія ' + bundle.version + ' — EXE для перевірки',
         'body': notes, 'draft': True, 'prerelease': True, 'make_latest': 'false',
     })
     release.require(candidate.get('prerelease') is True, 'Preview must remain a prerelease')
@@ -68,7 +68,7 @@ def main():
         release.require(file.is_file(), 'Preview screenshot is missing: ' + name)
         extras[name] = file.read_bytes()
     result = publish(client, bundle, extras, tag, os.environ['GITHUB_SHA'],
-                     (ROOT / 'docs/RESULTS-PREVIEW-UA.md').read_text())
+                     (ROOT / 'next-release-notes.md').read_text())
     report = {'status': 'passed', 'tag': tag, 'url': result['html_url'],
               'version': bundle.version, 'code': bundle.code, 'prerelease': True,
               'publicUpdateChannelUnchanged': True, 'assets': [a['name'] for a in result['assets']]}

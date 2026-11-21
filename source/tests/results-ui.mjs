@@ -15,7 +15,7 @@ const tests=['Вхідний контроль','Проміжний тест','П
 const make=(user,test,correct,extra={})=>({id:'r'+user+test,userId:'c'+user,userName:cadets[user-1].fullName,groupName:'Група 1',testId:'t'+test,testTitle:tests[test-1].title,total:20,choiceTotal:20,correct,score:correct*5,passed:correct>=14,durationSeconds:480+user*12,completedAt:'2026-10-27T10:00:00Z',earnedPoints:correct,maxPoints:20,gradingRevision:0,...extra});
 const results=[make(1,1,18,{durationSeconds:36009}),make(1,2,17,{durationSeconds:0}),make(2,1,20),make(2,2,15),make(3,1,0),make(4,3,5,{total:11,choiceTotal:10,gradingStatus:'pending_review',pendingWritten:1,score:null,passed:null}),make(5,3,0,{total:1,choiceTotal:0,gradingStatus:'pending_review',pendingWritten:1,score:null,passed:null})];
 const recoveries=[{id:'recovery-1',userName:'Савченко Ірина',groupName:'Група 2',testId:'t2',testTitle:tests[1].title,durationSeconds:123}];
-const user={id:'teacher',username:'WindRoy',fullName:'Розробник',role:'instructor'};
+let user={id:'teacher',username:'WindRoy',fullName:'Розробник',role:'instructor'};
 let state={version:1,theme:'light',session:{token:'local-results-fixture',user},groups,accounts:{teacher:{tests,results,cadets,fullTests:{},pending:[],reviews:{},resultTotal:results.length}}},journal={},truncated=false,deletionEnabled=false,resultRevision=1;
 const calls=[],errors=[],checks=[];
 const server=http.createServer(async(req,res)=>{
@@ -34,7 +34,7 @@ const server=http.createServer(async(req,res)=>{
    else if(p.path==='/api/instructor/reviews')Object.assign(reply,{results:results.filter(result=>Number(result.pendingWritten)>0),resultsRevision:'r'+resultRevision});
    else if(p.path==='/api/instructor/exam-recoveries')Object.assign(reply,{recoveries});
    else if(p.path==='/api/instructor/review-presence')Object.assign(reply,{sessions:[],serverNow:Date.now(),resultsRevision:'r'+resultRevision,stable:true});
-   else if(p.path==='/api/workspace')Object.assign(reply,{workspaceProtocol:1,user,revisions:{groups:'g1',tests:'t1',cadets:'c1',results:'r'+resultRevision+':'+(p.body.allResults?'all':'recent')},changes:{groups,tests,cadets,results:truncated?results.slice(0,2):results},resultTotal:truncated?10000:results.length,resultScope:p.body.allResults?'all':'recent',snapshotStable:true,capabilities:{writtenTests:true,multipleChoice:true,resultDeletion:deletionEnabled}});
+   else if(p.path==='/api/workspace'){const visible=user.role==='cadet'?results.filter(r=>r.userId===user.id):results;Object.assign(reply,{workspaceProtocol:1,user,revisions:{groups:'g1',tests:'t1',cadets:'c1',results:'r'+resultRevision+':'+(p.body.allResults?'all':'recent')},changes:{groups,tests,...(user.role==='instructor'?{cadets}:{}),results:truncated?visible.slice(0,2):visible},resultTotal:truncated?10000:visible.length,resultScope:p.body.allResults?'all':'recent',snapshotStable:true,capabilities:{writtenTests:true,multipleChoice:true,resultDeletion:deletionEnabled}});}
    else if(p.method==='DELETE'&&/^\/api\/instructor\/results\/[^/]+$/.test(p.path)){
     const resultId=p.path.split('/').at(-1),index=results.findIndex(result=>result.id===resultId);
     assert.equal(p.body.confirmResultId,resultId);
@@ -42,6 +42,7 @@ const server=http.createServer(async(req,res)=>{
     results.splice(index,1);resultRevision++;
     Object.assign(reply,{deleted:true,resultId});
    }
+   else if(p.path==='/api/exam-session')Object.assign(reply,{examProtocol:1,userId:user.id,serverNow:Date.now(),document:{revision:0,value:null}});
    else if(p.path==='/api/account-state')Object.assign(reply,{accountSyncProtocol:1,userId:user.id,cursor:'results-ui',documents:[],stable:true});
    else if(p.path==='/api/account-state/document')Object.assign(reply,{accountSyncProtocol:1,userId:user.id,document:{key:p.body.key,revision:1,value:p.body.value??null}});
    else if(p.path.endsWith('/review-session'))Object.assign(reply,{ok:false,code:'NOT_FOUND',error:'Fixture server without shared review sessions'});
@@ -238,10 +239,33 @@ try{
   assert.deepEqual(calls.filter(call=>call.method==='DELETE').map(call=>call.path),['/api/instructor/results/r11']);
   await refreshed();
  });
+ await check('Editing a test does not add a fourth ranking column or count the older higher score',async()=>{
+  tests.push({...tests[0],id:'t1-edited',canonicalTestId:'t1'});
+  results.push(make(2,1,4,{id:'meteo-retake',testId:'t1-edited',canonicalTestId:'t1',completedAt:'2026-11-19T10:00:00Z'}));resultRevision++;
+  await view('ranking');await page.locator('#shared-group').selectOption('g1');await click('refresh');await refreshed();
+  assert.equal(await page.locator('.ranking-test').count(),3);
+  const person=page.locator('.group-ranking tbody tr').filter({hasText:'Петренко Олег'});
+  assert.equal(await person.locator('.ranking-total strong').innerText(),'19');
+  assert.equal(await person.locator('[data-id="meteo-retake"]').count(),1);
+  assert.equal(await person.locator('[data-id="r21"]').count(),0);
+ });
+ await check('My Results shows the latest retake once and opens that exact work',async()=>{
+  await page.close();user=cadets[1];
+  state={version:1,theme:'light',session:{token:'cadet-retake-ui',user},groups,accounts:{[user.id]:{tests,results:results.filter(r=>r.userId===user.id),cadets:[],fullTests:{},pending:[],reviews:{}}}};journal={};
+  page=await browser.newPage({viewport:{width:1440,height:1000},locale:'uk-UA'});page.on('pageerror',x=>errors.push(x.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}/?key=results-ui`);await page.locator('.layout').waitFor();await refreshed();
+  assert.equal(await page.locator('.stat').filter({has:page.getByText('Результати',{exact:true})}).locator('.value').innerText(),'2');
+  await page.locator('.nav [data-page="results"]').click();await page.locator('.compact-results').waitFor();
+  assert.equal(await page.locator('.compact-results tbody tr').count(),2);
+  const retake=page.locator('[data-action="review-result"][data-id="meteo-retake"]');await retake.click();
+  await page.locator('.choice-review').filter({hasText:'Приклад питання'}).waitFor();
+  assert.ok(calls.some(call=>call.path==='/api/results/meteo-retake/review'));
+  await page.screenshot({path:path.join(root,'verification/retake-my-results.png'),fullPage:true});
+ });
  assert.ok(calls.some(call=>call.path==='/api/instructor/reviews'),'The current review queue route must be exercised');
  assert.ok(calls.some(call=>call.path==='/api/instructor/exam-recoveries'),'The current exam recovery route must be exercised');
  assert.deepEqual(errors,[]);
 }finally{
- fs.mkdirSync(path.join(root,'verification'),{recursive:true});fs.writeFileSync(path.join(root,'verification/results-ui.json'),JSON.stringify({status:errors.length||checks.length<21?'failed':'passed',passed:checks.length,checks,errors},null,2)+'\n');
+ fs.mkdirSync(path.join(root,'verification'),{recursive:true});fs.writeFileSync(path.join(root,'verification/results-ui.json'),JSON.stringify({status:errors.length||checks.length<23?'failed':'passed',passed:checks.length,checks,errors},null,2)+'\n');
  await browser?.close();await new Promise(resolve=>server.close(resolve));
 }

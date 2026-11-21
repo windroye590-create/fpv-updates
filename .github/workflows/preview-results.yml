@@ -1,9 +1,9 @@
-name: Перегляд об’єднаних результатів
+name: Повний FPV EXE для перевірки
 
 on:
   push:
     branches: ['preview/results-workspace']
-    paths: ['source/**', 'release-tools/**', 'docs/RESULTS-PREVIEW-UA.md', '.github/workflows/preview-results.yml']
+    paths: ['source/**', 'release-tools/**', 'next-release-notes.md', '.github/workflows/preview-results.yml']
 
 permissions:
   contents: write
@@ -24,16 +24,34 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m pip install Pillow==12.3.0 cryptography==50.0.2 openpyxl==3.1.5
+      - name: Check FPV owner and prepare the existing server deployment
+        env:
+          GAS_CREDENTIALS: ${{ secrets.GAS_CREDENTIALS }}
+          LK_SIGNING_PKCS12_BASE64: ${{ secrets.LK_SIGNING_PKCS12_BASE64 }}
+          LK_SIGNING_PASSWORD: ${{ secrets.LK_SIGNING_PASSWORD }}
+        run: |
+          python3 release-tools/release_pipeline.py check-secrets
+          python3 release-tools/appscript_deploy.py plan --receipt "$RUNNER_TEMP/fpv-server-plan.json"
       - name: Test results, grading, release safeguards and existing application logic
         run: |
           python3 -m unittest discover -s release-tools/tests -p 'test_*.py'
           npm --prefix source test
+          python3 source/tests/native_identity.py
       - name: Verify all tabs, real written grading and instructor review locks
         working-directory: source
         run: |
           npm install --ignore-scripts --no-audit --no-fund --no-package-lock
           npx playwright install --with-deps chromium
+          node tests/host-window-ui.mjs
+          node tests/pdf-export-ui.mjs
+          node tests/private-storage-ui.mjs
+          node tests/excel-report-ui.mjs
+          node tests/cadet-card-ui.mjs
+          node tests/section-filters-ui.mjs
           node tests/results-ui.mjs
+          node tests/materials-ui.mjs
+          node tests/finish-delivery-ui.mjs
+          node tests/start-finish-performance-ui.mjs
           node tests/written-ui.mjs
           node tests/review-presence-ui.mjs
           node tests/responsive-ui.mjs
@@ -52,6 +70,17 @@ jobs:
         run: |
           python3 release-tools/release_pipeline.py sign --bundle "$RUNNER_TEMP/preview-bundle"
           python3 source/tests/update_protocol.py "$RUNNER_TEMP/preview-bundle"
+      - name: Update the FPV server and preserve its existing URL
+        env:
+          GAS_CREDENTIALS: ${{ secrets.GAS_CREDENTIALS }}
+        run: |
+          python3 release-tools/appscript_deploy.py apply --receipt "$RUNNER_TEMP/fpv-server-plan.json"
+          python3 release-tools/verify_report_schema.py --receipt "$RUNNER_TEMP/fpv-server-plan.json"
+      - name: Upload the exact signed candidate for Windows verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fpv-manual-candidate
+          path: ${{ runner.temp }}/preview-bundle/*
       - name: Publish an immutable prerelease for manual review
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -63,4 +92,44 @@ jobs:
           path: |
             source/verification/*.json
             source/verification/results-*.png
+            ${{ runner.temp }}/fpv-server-plan.json
+          if-no-files-found: warn
+
+  windows-candidate:
+    needs: preview
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Download the candidate from this exact build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name fpv-manual-candidate --dir candidate
+      - name: Verify the candidate executable against its signed catalog
+        shell: pwsh
+        run: |
+          $fields = @{}
+          Get-Content candidate/updates.txt | Select-Object -Skip 2 | ForEach-Object {
+            $pair = $_ -split '=', 2
+            if ($pair.Length -eq 2) { $fields[$pair[0]] = $pair[1] }
+          }
+          $exe = Get-Item candidate/FPV-Komisiia-PC.exe
+          $digest = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $fields['windows.sha256'] -or $exe.Length -ne [long]$fields['windows.size']) { throw 'Candidate checksum mismatch' }
+          Write-Output "Verified FPV candidate $($fields['windows.name']) ($digest)"
+      - name: Execute the real Windows host and private storage checks
+        shell: pwsh
+        run: python source/tests/windows-private-storage.py candidate/FPV-Komisiia-PC.exe fpv-windows-candidate.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: fpv-windows-candidate-audit
+          path: fpv-windows-candidate.json
           if-no-files-found: warn

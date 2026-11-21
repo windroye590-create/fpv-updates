@@ -8,9 +8,10 @@ START='// BEGIN GENERATED EXCEL REPORT'
 END='// END GENERATED EXCEL REPORT'
 
 def expected():
-    source=(ROOT/'web/excel-report.js').read_text()
+    attempts=(ROOT/'web/result-attempts.js').read_text()
+    source=attempts+'\n'+re.sub(r'^import .* from .*;\n', '', (ROOT/'web/excel-report.js').read_text(), flags=re.M)
     source=re.sub(r'^export ', '', source, flags=re.M)
-    return START+'\nvar LKReport_=(function(){\n'+source+'\nreturn {reportModel:reportModel,xlsxParts:xlsxParts,reportFilename:reportFilename};\n})();\n'+END
+    return START+'\nvar LKReport_=(function(){\n'+source+'\nreturn {reportModel:reportModel,xlsxParts:xlsxParts,reportFilename:reportFilename,testSeriesResolver:testSeriesResolver};\n})();\n'+END
 
 def sync(check=False):
     path=ROOT/'Code.gs';source=path.read_text();generated=expected()
