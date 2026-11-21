@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "passed": 8,
+  "checks": [
+    "An unchanged password opens the existing owner copy after the server key changes",
+    "A recovered login retains its original encryption key and reopens offline after saving",
+    "Recovery can read an authenticated backup when the newest private object is damaged",
+    "A wrong local password cannot replace an existing copy even after online authentication",
+    "A different username or role cannot use the password recovery path",
+    "Knowing the password cannot bypass forged current or backup manifest authentication",
+    "An unchanged server key still supports an authorized password change",
+    "A malformed or foreign server key reply cannot trigger local password recovery"
+  ],
+  "actualSecureStorageExecuted": true,
+  "nativeProtocolModel": true,
+  "productionRequests": 0
+}

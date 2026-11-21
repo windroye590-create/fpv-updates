@@ -64,7 +64,16 @@
   "packedResources": 27,
   "packagedStartupChecks": 11,
   "verification": {
-    "status": "local recovery and browser checks passed; signed Windows build pending"
+    "status": "passed",
+    "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.8-preview.4",
+    "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44910989661",
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "serverChanged": false,
+    "actualWindowsChecks": 16,
+    "publicUpdateChannelUnchanged": true,
+    "localKeyRecoveryChecks": 8,
+    "privateStorageBrowserChecks": 18,
+    "userPCFileInspected": false
   },
   "history": [
     {

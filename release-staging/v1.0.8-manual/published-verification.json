@@ -1,0 +1,113 @@
+{
+  "status": "passed",
+  "commission": "FPV",
+  "version": "1.0.8",
+  "code": 9,
+  "distribution": "manual complete EXE",
+  "prerelease": true,
+  "workflow": "https://github.com/windroye590-create/fpv-updates/actions/runs/44910989661",
+  "release": "https://github.com/windroye590-create/fpv-updates/releases/tag/v1.0.8-preview.4",
+  "sourceCommit": "406362d24f50c46562d651bb40609fe0408587fe",
+  "commonSourceCommit": "3f0e02a803ab0c47ede2082c57e3f46abf0aaf7b",
+  "binary": {
+    "filename": "FPV-Komisiia-PC.exe",
+    "size": 2028839,
+    "sha256": "eae1a687903e52f35528aaa07ae5bcdbbc3c152a870276819a5362782b2b6366",
+    "signedCatalogVerified": true
+  },
+  "server": {
+    "version": 26,
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "fastTestStart": true,
+    "deferredResultStats": true,
+    "deletedAttemptRetakes": true,
+    "formattedResultsReady": true,
+    "cadetCriticalPath": true,
+    "cadetGoogleOptimization": true,
+    "conditionalReviewQueue": true
+  },
+  "deployment": {
+    "status": "passed",
+    "api": 26,
+    "serverBuild": "pc-api26-c94f2c63543ad054",
+    "deployed": false,
+    "version": 4
+  },
+  "windows": {
+    "status": "passed",
+    "passed": 16,
+    "checks": [
+      "Upgrade archives old data and refuses anonymous legacy or global journal access",
+      "Real AES-256-GCM and Windows DPAPI round-trip a private account object",
+      "Lost object acknowledgements retry idempotently without allowing overwrite",
+      "Changing a nonce, GCM tag or ciphertext is rejected even after valid DPAPI rewrapping",
+      "The GCM identity binds both the account owner and the immutable object identifier",
+      "The profile keeps three distinct backups and rejects conflicting commits",
+      "Corrupt profiles restore a verified backup while sharing violations remain visible errors",
+      "If every profile copy is damaged the host refuses an empty reset or overwrite",
+      "A large Unicode journal restores backups and never falsely acknowledges a rolled-back serial",
+      "Collection removes orphan objects and preserves every referenced object and account journal",
+      "Closing the native vault invalidates its capability and exposes backup recovery status",
+      "The remembered vault key is DPAPI-protected and contains no password or bearer token",
+      "A complete Windows host restart restores the saved key, private objects and last journal",
+      "A locked saved-login file reports an error and never falsely acknowledges logout",
+      "A corrupt saved-login cache cannot erase private data and can be repaired by a valid owner",
+      "Explicit logout remains forgotten after another complete Windows restart"
+    ],
+    "actualWindowsHostExecuted": true,
+    "realDPAPIVerified": true,
+    "realCNGGCMVerified": true,
+    "productionRPCRequests": 0,
+    "browserRendered": false
+  },
+  "publicUpdateChannelUnchanged": true,
+  "stableVersion": "1.0.5",
+  "stableChannelHashes": {
+    "FPV-Komisiia-PC.exe": "ac98986457aba6030f0022faddc68ced4b5d9049793a7cab40b5006d1598a6fc",
+    "updates.txt": "0fe5bdc0bfda42616fe91b12ca59baeb1175aca6fcd06f6423315b157fdc99e0",
+    "index.html": "6dfca7f098dbf16b5c8d60832d9d46c4b8223d5572fe781e0e49a9b173633561",
+    "icon.png": "8009da9cda2cbab1ea547d5932528d190bf4259256d4911f01158b7ffeec2d14"
+  },
+  "liveGoogleClassroomLoadMeasured": false,
+  "verifiedAt": "2026-11-21T13:59:01.510454+00:00",
+  "workflowConclusion": "success",
+  "publicExecutableDownloadedAndVerified": true,
+  "packedResources": 27,
+  "nativeCatalogChecks": 29,
+  "commonVersion": "1.2.48",
+  "localKeyRecovery": {
+    "status": "passed",
+    "version": "1.0.8",
+    "reproducedOldError": "LOCAL_COPY_UNAVAILABLE",
+    "scenario": "authenticated online session, unchanged password, changed server-derived key",
+    "localKeyRecoveryChecks": 8,
+    "existingPrivateStorageChecks": 20,
+    "privateStorageBrowserChecks": 18,
+    "originalCryptoAndFPVIdentityPreserved": true,
+    "userPCFileInspected": false,
+    "regressionChecks": [
+      "An unchanged password opens the existing owner copy after the server key changes",
+      "A recovered login retains its original encryption key and reopens offline after saving",
+      "Recovery can read an authenticated backup when the newest private object is damaged",
+      "A wrong local password cannot replace an existing copy even after online authentication",
+      "A different username or role cannot use the password recovery path",
+      "Knowing the password cannot bypass forged current or backup manifest authentication",
+      "An unchanged server key still supports an authorized password change",
+      "A malformed or foreign server key reply cannot trigger local password recovery"
+    ]
+  },
+  "checks": {
+    "local-key-recovery": 8,
+    "private-storage": 20,
+    "private-storage-ui": 18,
+    "remembered-login": 11,
+    "native-identity": 12,
+    "start-finish-performance": 19,
+    "cadet-google-optimization": 8
+  },
+  "packagedStartup": {
+    "status": "passed",
+    "checks": 11,
+    "assets": 27
+  }
+}
