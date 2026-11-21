@@ -1,4 +1,4 @@
-"""Publish an immutable signed UI preview without changing the public update channel."""
+"""Publish an immutable complete FPV candidate without changing the public update channel."""
 import json
 import os
 from pathlib import Path
@@ -51,8 +51,8 @@ def main():
                     'This preview workflow is limited to its review branch')
     directory = Path(sys.argv[1])
     bundle = release.read_bundle(directory, ROOT / 'release-tools/update-public.pem')
-    release.require('export const PREVIEW_BUILD=true;' in (ROOT / 'source/web/core.js').read_text(),
-                    'The preview must be visibly marked')
+    release.require('export const PREVIEW_BUILD=false;' in (ROOT / 'source/web/core.js').read_text(),
+                    'The manual FPV candidate must contain the full application')
     client = release.GitHub(release.REPOSITORY, os.environ['GITHUB_TOKEN'])
     ref = client.request('GET', '/git/ref/heads/preview/results-workspace')
     if ref['object']['sha'] != os.environ['GITHUB_SHA']:
