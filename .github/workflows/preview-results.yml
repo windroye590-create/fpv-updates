@@ -1,9 +1,7 @@
 name: Повний FPV EXE для перевірки
 
 on:
-  push:
-    branches: ['preview/results-workspace']
-    paths: ['source/**', 'release-tools/**', 'next-release-notes.md', '.github/workflows/preview-results.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write
